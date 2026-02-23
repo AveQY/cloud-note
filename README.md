@@ -4,12 +4,9 @@
 
 云笔记是一个基于 Markdown 的轻量级在线笔记平台。前端使用 Vue 3 + Vite 构建，后端使用一个简单的 Express 服务提供文件读取、保存、上传图片、分享链接、验证码和登录验证功能。笔记以 `.md` 文件形式存放于仓库的 `file/` 目录。
 
-| <img width="2880" height="1351" alt="image" src="https://github.com/user-attachments/assets/49a14e16-b5e3-45dc-a50e-e34616073eab" /> | <img width="2880" height="1348" alt="image" src="https://github.com/user-attachments/assets/1d5b68a0-b4b6-4a0e-901b-133d4b21744f" />
- |
+| <img width="2880" height="1351" alt="image" src="https://github.com/user-attachments/assets/49a14e16-b5e3-45dc-a50e-e34616073eab" /> | <img width="2880" height="1348" alt="image" src="https://github.com/user-attachments/assets/1d5b68a0-b4b6-4a0e-901b-133d4b21744f" />|
 | ----------- | ----------- |
-| <img width="2880" height="1342" alt="image" src="https://github.com/user-attachments/assets/2b75427a-bdae-404d-bb73-da2b9fc6b93d" />
- | <img width="2880" height="1336" alt="image" src="https://github.com/user-attachments/assets/db11e226-b65a-4703-a334-700db1ff3d75" />
- |
+| <img width="2880" height="1342" alt="image" src="https://github.com/user-attachments/assets/2b75427a-bdae-404d-bb73-da2b9fc6b93d" /> | <img width="2880" height="1336" alt="image" src="https://github.com/user-attachments/assets/db11e226-b65a-4703-a334-700db1ff3d75" /> |
 
 主要特性
 
