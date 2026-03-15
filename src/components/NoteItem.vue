@@ -23,20 +23,38 @@ const handleContextMenu = (event: MouseEvent) => {
   emit('contextmenu', event, props.note)
 }
 
-const formatDate = (date: Date) => {
+const formatRelativeTime = (date: Date) => {
   const now = new Date()
-  const diff = now.getTime() - date.getTime()
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-  
-  if (days === 0) {
-    return '今天'
-  } else if (days === 1) {
-    return '昨天'
-  } else if (days < 7) {
-    return `${days}天前`
-  } else {
-    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  const diffMs = now.getTime() - date.getTime()
+  const diffSec = Math.floor(diffMs / 1000)
+  const diffMin = Math.floor(diffMs / (1000 * 60))
+  const diffHour = Math.floor(diffMs / (1000 * 60 * 60))
+  const diffDay = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+  if (diffMs < 0) {
+    const absSec = Math.floor(-diffMs / 1000)
+    const absMin = Math.floor(-diffMs / (1000 * 60))
+    if (absSec < 60) return '刚刚'
+    if (absMin < 60) return absMin <= 1 ? '1分钟内' : `${absMin}分钟后`
+    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   }
+  if (diffSec < 10) return '刚刚'
+  if (diffSec < 60) return `${diffSec}秒前`
+  if (diffMin < 60) return diffMin === 1 ? '1分钟前' : `${diffMin}分钟前`
+  if (diffHour < 24) return diffHour === 1 ? '1小时前' : `${diffHour}小时前`
+  if (diffDay === 0) {
+    const h = String(date.getHours()).padStart(2, '0')
+    const m = String(date.getMinutes()).padStart(2, '0')
+    return `今天 ${h}:${m}`
+  }
+  if (diffDay === 1) {
+    const h = String(date.getHours()).padStart(2, '0')
+    const m = String(date.getMinutes()).padStart(2, '0')
+    return `昨天 ${h}:${m}`
+  }
+  if (diffDay < 7) return `${diffDay}天前`
+  if (diffDay < 30) return `${Math.floor(diffDay / 7)}周前`
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 </script>
 
@@ -56,8 +74,13 @@ const formatDate = (date: Date) => {
     </svg>
     <div class="note-item__content">
       <div class="note-item__title">{{ note.title }}</div>
-      <div v-if="note.updatedAt" class="note-item__date">
-        {{ formatDate(note.updatedAt) }}
+      <div v-if="note.updatedAt || note.createdAt" class="note-item__date">
+        <span v-if="note.createdAt && note.updatedAt && note.createdAt.getTime() !== note.updatedAt.getTime()">
+          创建 {{ formatRelativeTime(note.createdAt) }} · 修改 {{ formatRelativeTime(note.updatedAt) }}
+        </span>
+        <span v-else>
+          {{ formatRelativeTime(note.updatedAt || note.createdAt!) }}
+        </span>
       </div>
     </div>
   </div>

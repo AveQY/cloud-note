@@ -40,7 +40,7 @@ const handleClose = () => {
 <template>
   <Teleport to="body">
     <Transition name="dialog-fade">
-      <div v-if="show" class="share-link-dialog-overlay" @click="handleClose">
+      <div v-if="show" class="share-link-dialog-overlay" @click.stop>
         <Transition name="dialog-slide">
           <div v-if="show" class="share-link-dialog" @click.stop>
             <div class="share-link-dialog__header">

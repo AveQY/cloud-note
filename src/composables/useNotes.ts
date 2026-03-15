@@ -38,8 +38,8 @@ export function useNotes() {
         filename: file.filename,
         path: file.path,
         size: file.size || 0,
-        createdAt: new Date(file.lastModified),
-        updatedAt: new Date(file.lastModified)
+        createdAt: new Date(file.createdAt ?? file.lastModified),
+        updatedAt: new Date(file.updatedAt ?? file.lastModified)
       }))
 
       if (append) {

@@ -119,7 +119,7 @@ onUnmounted(() => {
   background: #ffffff;
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
-  min-width: 160px;
+  min-width: 200px;
   overflow: hidden;
   z-index: 100;
   animation: dropdownSlideIn 0.2s ease;

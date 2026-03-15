@@ -68,17 +68,21 @@ const updateHeadings = () => {
 const scrollToHeading = (id: string) => {
   if (!props.container) return
 
+  // Try to find heading in rendered content first
   const element = props.container.querySelector(`[data-heading="${id}"]`)
   if (element) {
     element.scrollIntoView({ behavior: 'smooth', block: 'start' })
     return
   }
 
+  // For editing mode, find the heading in textarea
   const textarea = props.container.querySelector('textarea')
   if (textarea) {
     const lines = props.content.split('\n')
-    let targetLine = 0
-    
+    let targetLine = -1
+    let targetText = ''
+
+    // Find the target heading line
     for (let i = 0; i < lines.length; i++) {
       const match = lines[i].match(/^(#{1,6})\s+(.+)$/)
       if (match) {
@@ -86,14 +90,58 @@ const scrollToHeading = (id: string) => {
         const headingId = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')
         if (headingId === id) {
           targetLine = i
+          targetText = text
           break
         }
       }
     }
 
-    const lineHeight = 24
-    const scrollPosition = targetLine * lineHeight
-    textarea.scrollTop = scrollPosition
+    if (targetLine === -1) return
+
+    // Create a temporary element to calculate the exact position
+    const tempElement = document.createElement('div')
+    tempElement.style.position = 'absolute'
+    tempElement.style.visibility = 'hidden'
+    tempElement.style.whiteSpace = 'pre-wrap'
+    tempElement.style.wordBreak = 'break-all'
+    tempElement.style.font = window.getComputedStyle(textarea).font
+    tempElement.textContent = targetText
+    
+    // Prepend the heading markers
+    const lineContent = lines[targetLine]
+    const match = lineContent.match(/^(#{1,6})\s+/)
+    if (match) {
+      tempElement.textContent = lineContent
+    }
+    
+    textarea.appendChild(tempElement)
+    
+    // Calculate the position
+    const rect = tempElement.getBoundingClientRect()
+    const textareaRect = textarea.getBoundingClientRect()
+    const targetScrollTop = rect.top - textareaRect.top - 50 // 50px offset from top
+    
+    textarea.removeChild(tempElement)
+    
+    textarea.scrollTo({
+      top: targetScrollTop,
+      behavior: 'smooth'
+    })
+    textarea.focus()
+    return
+  }
+
+  // For viewing mode, use scrollIntoView with container
+  if (!element && props.container) {
+    const headingElements = Array.from(props.container.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+    for (const el of headingElements) {
+      const text = el.textContent?.trim() || ''
+      const headingId = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+      if (headingId === id) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        break
+      }
+    }
   }
 }
 
@@ -103,13 +151,18 @@ const updateActiveHeading = () => {
   const textarea = props.container.querySelector('textarea')
   if (textarea) {
     const lines = props.content.split('\n')
-    const lineHeight = 24
+    const computedStyle = window.getComputedStyle(textarea)
+    const lineHeightPx = computedStyle.lineHeight
+    const fontSizePx = computedStyle.fontSize
+    const lineHeight = lineHeightPx !== 'normal' ? parseFloat(lineHeightPx) : parseFloat(fontSizePx) * 1.8
     const scrollTop = textarea.scrollTop
-    const currentLine = Math.floor(scrollTop / lineHeight)
+    const currentLine = Math.min(Math.floor(scrollTop / lineHeight), lines.length - 1)
     
     let activeHeadingId = ''
     for (let i = 0; i <= currentLine; i++) {
-      const match = lines[i].match(/^(#{1,6})\s+(.+)$/)
+      const line = lines[i]
+      if (line == null) continue
+      const match = line.match(/^(#{1,6})\s+(.+)$/)
       if (match) {
         const text = match[2].trim()
         activeHeadingId = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')
@@ -384,6 +437,7 @@ const renderHeadingItem = (heading: Heading, index: number) => {
   pointer-events: auto;
   display: flex;
   flex-direction: column;
+  z-index: 1002;
 }
 
 .toc__sidebar--fixed-left {
@@ -516,8 +570,15 @@ const renderHeadingItem = (heading: Heading, index: number) => {
 
 .toc__content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px 0;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  /* Prevent scroll from propagating to parent containers */
+  pointer-events: auto;
 }
 
 .toc__content::-webkit-scrollbar {
@@ -596,6 +657,7 @@ const renderHeadingItem = (heading: Heading, index: number) => {
   visibility: hidden;
   transition: all 0.3s ease;
   pointer-events: none;
+  z-index: 1000;
 }
 
 .toc__overlay--visible {

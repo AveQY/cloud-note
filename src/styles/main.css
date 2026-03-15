@@ -1,3 +1,5 @@
+@import './preview.css';
+
 :root {
   --primary-color: #51bf6f;
   --primary-light: #e8f5ec;
@@ -57,5 +59,26 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--primary-dark);
+  opacity: 0.8;
+}
+
+.preview-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.preview-content::-webkit-scrollbar-track {
+  background: #f8faf9;
+  border-radius: 4px;
+}
+
+.preview-content::-webkit-scrollbar-thumb {
+  background: #84fdb3;
+  border-radius: 4px;
+  opacity: 0.5;
+}
+
+.preview-content::-webkit-scrollbar-thumb:hover {
+  background: #73ff98;
   opacity: 0.8;
 }

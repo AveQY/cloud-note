@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
+import TaskLists from 'markdown-it-task-lists'
 import TableOfContents from './TableOfContents.vue'
+import '@/styles/preview.css'
 
 interface Props {
   shareId: string
@@ -21,6 +23,11 @@ const md = new MarkdownIt({
   linkify: true,
   typographer: true
 })
+  .use(TaskLists, {
+    enabled: true,
+    label: true,
+    labelAfter: false
+  })
 
 const loadNote = async () => {
   loading.value = true
@@ -126,7 +133,7 @@ onMounted(() => {
         showLeftToggle
       />
       <div class="share-page__wrapper">
-        <div class="share-page__body" ref="contentBodyRef" v-html="content"></div>
+        <div class="share-page__body preview-content" ref="contentBodyRef" v-html="content"></div>
       </div>
     </div>
   </div>
@@ -222,206 +229,6 @@ onMounted(() => {
   }
 }
 
-.share-page__body {
-  line-height: 1.9;
-  color: #000000;
-  font-size: 16px;
-  min-height: 100%;
-}
-
-.share-page__body :deep(h1),
-.share-page__body :deep(h2),
-.share-page__body :deep(h3),
-.share-page__body :deep(h4),
-.share-page__body :deep(h5),
-.share-page__body :deep(h6) {
-  margin-top: 32px;
-  margin-bottom: 16px;
-  font-weight: 600;
-  color: #000000;
-  letter-spacing: -0.3px;
-}
-
-.share-page__body :deep(h1) {
-  font-size: 30px;
-  color: #000000;
-  border-bottom: 2px solid var(--primary-light);
-  padding-bottom: 8px;
-}
-
-.share-page__body :deep(h2) {
-  font-size: 26px;
-  color: #000000;
-}
-
-.share-page__body :deep(h3) {
-  font-size: 22px;
-  color: #000000;
-}
-
-.share-page__body :deep(h4) {
-  font-size: 20px;
-  color: #000000;
-}
-
-.share-page__body :deep(p) {
-  margin-bottom: 16px;
-  color: #000000;
-}
-
-.share-page__body :deep(ul),
-.share-page__body :deep(ol) {
-  margin-bottom: 20px;
-  padding-left: 28px;
-}
-
-.share-page__body :deep(li) {
-  margin-bottom: 10px;
-  line-height: 1.8;
-  color: #000000;
-}
-
-.share-page__body :deep(code) {
-  background: linear-gradient(135deg, var(--primary-light) 0%, #f0f9f4 100%);
-  color: var(--primary-dark);
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-family: 'Courier New', 'Fira Code', monospace;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.share-page__body :deep(pre) {
-  background: #1a1a1a;
-  color: #e8f5ec;
-  padding: 20px;
-  border-radius: var(--radius-md);
-  overflow-x: auto;
-  margin-bottom: 20px;
-  box-shadow: var(--shadow-sm);
-  border: 1px solid #333;
-  position: relative;
-}
-
-.share-page__body :deep(pre code) {
-  background: transparent;
-  color: inherit;
-  padding: 0;
-  font-size: 14px;
-}
-
-.share-page__body :deep(.copy-button) {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  min-width: 32px;
-  height: 32px;
-  padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  transition: all 0.2s ease;
-  color: #e8f5ec;
-  font-size: 12px;
-}
-
-.share-page__body :deep(.copy-button:hover) {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.share-page__body :deep(.copy-button:active) {
-  transform: scale(0.95);
-}
-
-.share-page__body :deep(.copy-icon) {
-  width: 18px;
-  height: 18px;
-}
-
-.share-page__body :deep(.copy-button span) {
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.share-page__body :deep(.copy-button.copied) {
-  background: rgba(81, 191, 111, 0.3);
-  border-color: rgba(81, 191, 111, 0.5);
-  color: #51bf6f;
-}
-
-.share-page__body :deep(blockquote) {
-  border-left: 4px solid var(--primary-color);
-  padding-left: 20px;
-  margin: 20px 0;
-  color: var(--text-secondary);
-  background: var(--primary-light);
-  padding: 16px 20px;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  font-style: italic;
-}
-
-.share-page__body :deep(a) {
-  color: var(--primary-color);
-  text-decoration: none;
-  border-bottom: 1px solid var(--primary-color);
-  transition: all 0.2s ease;
-}
-
-.share-page__body :deep(a:hover) {
-  color: var(--primary-dark);
-  border-bottom-color: var(--primary-dark);
-}
-
-.share-page__body :deep(table) {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 20px;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  box-shadow: var(--shadow-sm);
-}
-
-.share-page__body :deep(th),
-.share-page__body :deep(td) {
-  border: 1px solid var(--border-color);
-  padding: 12px 16px;
-  text-align: left;
-}
-
-.share-page__body :deep(th) {
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-  color: #ffffff;
-  font-weight: 600;
-}
-
-.share-page__body :deep(tr:nth-child(even)) {
-  background-color: var(--bg-color);
-}
-
-.share-page__body :deep(tr:hover) {
-  background-color: var(--primary-light);
-}
-
-.share-page__body :deep(img) {
-  max-width: 100%;
-  height: auto;
-  border-radius: 8px;
-  margin: 1.5em 0;
-}
-
-.share-page__body :deep(hr) {
-  border: none;
-  border-top: 2px solid var(--border-color);
-  margin: 2em 0;
-}
-
 @media (max-width: 1024px) {
   .share-page__wrapper {
     padding-left: 280px;
@@ -432,18 +239,6 @@ onMounted(() => {
   .share-page__wrapper {
     padding: 40px 24px;
     padding-left: 24px;
-  }
-
-  .share-page__body :deep(h1) {
-    font-size: 1.75em;
-  }
-
-  .share-page__body :deep(h2) {
-    font-size: 1.5em;
-  }
-
-  .share-page__body :deep(h3) {
-    font-size: 1.25em;
   }
 }
 </style>

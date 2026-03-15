@@ -35,10 +35,6 @@ const handleClose = () => {
   emit('close')
 }
 
-const handleBackdropClick = () => {
-  emit('close')
-}
-
 const handleKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Escape') {
     handleClose()
@@ -49,7 +45,7 @@ const handleKeydown = (event: KeyboardEvent) => {
 <template>
   <Teleport to="body">
     <Transition name="dialog-fade">
-      <div v-if="show" class="info-dialog-overlay" @click="handleBackdropClick">
+      <div v-if="show" class="info-dialog-overlay">
         <Transition name="dialog-slide">
           <div v-if="show" class="info-dialog" @click.stop @keydown="handleKeydown">
             <div class="info-dialog__header">

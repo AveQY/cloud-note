@@ -1,7 +1,34 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import MarkdownIt from 'markdown-it'
+import TaskLists from 'markdown-it-task-lists'
 import TableOfContents from './TableOfContents.vue'
+import '@/styles/preview.css'
 import type { Note } from '@/types'
+
+const md = new MarkdownIt({
+  html: true,
+  linkify: true,
+  typographer: true,
+  breaks: false,
+  xhtmlOut: false
+})
+  .use(TaskLists, {
+    enabled: true,
+    label: true,
+    labelAfter: false
+  })
+
+md.renderer.rules.image = function (tokens, idx, options, env, self) {
+  const token = tokens[idx]
+  const src = token.attrGet('src')
+  const alt = token.attrGet('alt') || ''
+  if (src) {
+    const cleanSrc = src.trim().replace(/^`|`$/g, '').replace(/^["']|["']$/g, '').trim()
+    return `<img src="${cleanSrc}" alt="${alt}">`
+  }
+  return self.renderToken(tokens, idx, options)
+}
 
 interface Props {
   note: Note
@@ -12,7 +39,7 @@ const props = defineProps<Props>()
 
 interface Emits {
   'update:content': [value: string]
-  save: [content: string]
+  save: [content: string, isAutoSave?: boolean]
   cancel: []
 }
 
@@ -53,12 +80,59 @@ const fileInfo = computed(() => {
   }
 })
 
-const handleInput = (event: Event) => {
-  const target = event.target as HTMLTextAreaElement
-  emit('update:content', target.value)
+const showPreview = ref(true)
+const previewHtml = computed(() => md.render(props.content))
+let isSyncingScroll = false
+
+const AUTO_SAVE_DELAY_MS = 15000
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let savedCursorPosition: { start: number; end: number } | null = null
+
+const scheduleAutoSave = () => {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = null
+    // Save cursor position before auto-save
+    const textarea = editor.value
+    if (textarea) {
+      savedCursorPosition = {
+        start: textarea.selectionStart,
+        end: textarea.selectionEnd
+      }
+    }
+    // Silently save in background without exiting edit mode
+    emit('save', props.content, true)
+  }, AUTO_SAVE_DELAY_MS)
 }
 
-const handleTab = (event: KeyboardEvent) => {
+const handleContentUpdate = (newContent: string) => {
+  emit('update:content', newContent)
+  scheduleAutoSave()
+}
+
+const saveCursorPosition = () => {
+  const textarea = editor.value
+  if (textarea) {
+    savedCursorPosition = {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd
+    }
+  }
+}
+
+const restoreCursorPosition = () => {
+  const textarea = editor.value
+  if (textarea && savedCursorPosition && savedCursorPosition.start !== null) {
+    const newLength = textarea.value.length
+    textarea.setSelectionRange(
+      Math.min(savedCursorPosition.start, newLength),
+      Math.min(savedCursorPosition.end, newLength)
+    )
+    savedCursorPosition = null
+  }
+}
+
+const handleKeyDown = (event: KeyboardEvent) => {
   if (event.key === 'Tab') {
     event.preventDefault()
     const target = event.target as HTMLTextAreaElement
@@ -69,6 +143,90 @@ const handleTab = (event: KeyboardEvent) => {
     target.value = value.substring(0, start) + '  ' + value.substring(end)
     target.selectionStart = target.selectionEnd = start + 2
     emit('update:content', target.value)
+    scheduleAutoSave()
+    return
+  }
+
+  const textarea = editor.value
+  if (!textarea) return
+
+  if (!event.ctrlKey) return
+
+  const target = event.target as HTMLTextAreaElement
+  const start = target.selectionStart
+  const end = target.selectionEnd
+  const value = target.value
+  const selectedText = value.substring(start, end)
+  
+  let newText = ''
+  let cursorOffset = 0
+
+  switch (event.key) {
+    case 'b':
+      // Ctrl+B - 加粗
+      event.preventDefault()
+      if (selectedText) {
+        newText = `**${selectedText}**`
+        cursorOffset = newText.length
+      } else {
+        newText = '****'
+        cursorOffset = 2
+      }
+      break
+    
+    case 'i':
+      // Ctrl+I - 斜体
+      event.preventDefault()
+      if (selectedText) {
+        newText = `*${selectedText}*`
+        cursorOffset = newText.length
+      } else {
+        newText = '**'
+        cursorOffset = 1
+      }
+      break
+    
+    case 'k':
+      // Ctrl+K - 代码块
+      event.preventDefault()
+      if (selectedText) {
+        newText = `\`\`\`\n${selectedText}\n\`\`\``
+        cursorOffset = newText.length
+      } else {
+        newText = '```\n\n```'
+        cursorOffset = 4
+      }
+      break
+    
+    case '>':
+      // Ctrl+> - 引用
+      event.preventDefault()
+      if (selectedText) {
+        // 处理多行选中,给每行前面添加 >
+        const lines = selectedText.split('\n')
+        const quotedLines = lines.map(line => `> ${line}`)
+        newText = quotedLines.join('\n')
+        cursorOffset = newText.length
+      } else {
+        newText = '> '
+        cursorOffset = 2
+      }
+      break
+  }
+
+  if (newText) {
+    const newValue = value.substring(0, start) + newText + value.substring(end)
+    emit('update:content', newValue)
+    scheduleAutoSave()
+    
+    // 设置光标位置
+    const newCursorPosition = start + cursorOffset
+    setTimeout(() => {
+      if (editor.value) {
+        editor.value.setSelectionRange(newCursorPosition, newCursorPosition)
+        editor.value.focus()
+      }
+    }, 0)
   }
 }
 
@@ -76,6 +234,7 @@ const handlePaste = async (event: ClipboardEvent) => {
   const items = event.clipboardData?.items
   if (!items) return
 
+  scheduleAutoSave()
   for (const item of items) {
     if (item.type.startsWith('image/')) {
       event.preventDefault()
@@ -238,34 +397,138 @@ const handlePaste = async (event: ClipboardEvent) => {
 }
 
 const handleSave = () => {
-  emit('save', props.content)
+  emit('save', props.content, false)
 }
 
 onMounted(() => {
   const textarea = editor.value
   if (textarea) {
     textarea.addEventListener('paste', handlePaste)
+    textarea.addEventListener('scroll', syncTextareaScroll)
+  }
+  
+  const preview = document.querySelector('.note-editor__preview')
+  if (preview) {
+    preview.addEventListener('scroll', syncPreviewScroll)
   }
 })
 
 onUnmounted(() => {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer)
+    autoSaveTimer = null
+  }
   const textarea = editor.value
   if (textarea) {
     textarea.removeEventListener('paste', handlePaste)
+    textarea.removeEventListener('scroll', syncTextareaScroll)
+  }
+  
+  const preview = document.querySelector('.note-editor__preview')
+  if (preview) {
+    preview.removeEventListener('scroll', syncPreviewScroll)
   }
 })
+
+const syncPreviewScroll = () => {
+  if (isSyncingScroll) return
+  isSyncingScroll = true
+  
+  try {
+    const textarea = editor.value
+    const preview = document.querySelector('.note-editor__preview')
+    if (!textarea || !preview) return
+
+    const textareaScrollTop = textarea.scrollTop
+    const textareaScrollHeight = textarea.scrollHeight
+    const textareaClientHeight = textarea.clientHeight
+
+    const previewScrollTop = preview.scrollTop
+    const previewScrollHeight = preview.scrollHeight
+    const previewClientHeight = preview.clientHeight
+
+    const textareaScrollable = textareaScrollHeight - textareaClientHeight
+    const previewScrollable = previewScrollHeight - previewClientHeight
+
+    if (previewScrollable > 0 && textareaScrollable > 0) {
+      const scrollTopRatio = previewScrollTop / previewScrollable
+      const targetTextareaScrollTop = scrollTopRatio * textareaScrollable
+
+      if (Math.abs(textarea.scrollTop - targetTextareaScrollTop) > 1) {
+        textarea.scrollTo({
+          top: targetTextareaScrollTop,
+          behavior: 'auto'
+        })
+      }
+    }
+  } finally {
+    isSyncingScroll = false
+  }
+}
+
+const syncTextareaScroll = () => {
+  if (isSyncingScroll) return
+  isSyncingScroll = true
+  
+  try {
+    const textarea = editor.value
+    const preview = document.querySelector('.note-editor__preview')
+    if (!textarea || !preview) return
+
+    const textareaScrollTop = textarea.scrollTop
+    const textareaScrollHeight = textarea.scrollHeight
+    const textareaClientHeight = textarea.clientHeight
+
+    const previewScrollTop = preview.scrollTop
+    const previewScrollHeight = preview.scrollHeight
+    const previewClientHeight = preview.clientHeight
+
+    const textareaScrollable = textareaScrollHeight - textareaClientHeight
+    const previewScrollable = previewScrollHeight - previewClientHeight
+
+    if (textareaScrollable > 0 && previewScrollable > 0) {
+      const scrollTopRatio = textareaScrollTop / textareaScrollable
+      const targetPreviewScrollTop = scrollTopRatio * previewScrollable
+
+      if (Math.abs(preview.scrollTop - targetPreviewScrollTop) > 1) {
+        preview.scrollTo({
+          top: targetPreviewScrollTop,
+          behavior: 'auto'
+        })
+      }
+    }
+  } finally {
+    isSyncingScroll = false
+  }
+}
+
 </script>
 
 <template>
   <div class="note-editor" ref="mainContainerRef">
     <div class="note-editor__header">
-      <button class="note-editor__back-button" @click="emit('cancel')">
-        <svg class="note-editor__back-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M19 12H5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M12 19L5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        返回
-      </button>
+      <div class="note-editor__header-left">
+        <button class="note-editor__back-button" @click="emit('cancel')">
+          <svg class="note-editor__back-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M19 12H5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M12 19L5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="note-editor__back-text">返回</span>
+        </button>
+        <button
+          type="button"
+          class="note-editor__preview-toggle"
+          :class="{ 'note-editor__preview-toggle--active': showPreview }"
+          @click="showPreview = !showPreview"
+          title="切换预览"
+        >
+          <svg class="note-editor__preview-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M14 2V8H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="note-editor__preview-text">预览</span>
+        </button>
+      </div>
       <div class="note-editor__info">
         <span class="note-editor__info-text">上次编辑于 {{ fileInfo.date }}</span>
         <span class="note-editor__info-divider">|</span>
@@ -279,18 +542,23 @@ onUnmounted(() => {
           <path d="M19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H16L19 9V19Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           <path d="M17 21V13H7V21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        保存
+        <span class="note-editor__save-text">保存</span>
       </button>
     </div>
-    <textarea
-      ref="editor"
-      class="note-editor__textarea"
-      :value="content"
-      @input="handleInput"
-      @keydown="handleTab"
-      placeholder="开始编写你的笔记... (支持 Ctrl+V 粘贴图片)"
-      spellcheck="false"
-    />
+    <div class="note-editor__body" :class="{ 'note-editor__body--preview-on': showPreview }">
+      <textarea
+        ref="editor"
+        class="note-editor__textarea"
+        :value="content"
+        @input="handleContentUpdate($event.target.value)"
+        @focus="saveCursorPosition"
+        @blur="restoreCursorPosition"
+        @keydown="handleKeyDown"
+        placeholder="开始编写你的笔记... (支持 Ctrl+V 粘贴图片, Ctrl+B 加粗, Ctrl+I 斜体, Ctrl+K 代码块, Ctrl+> 引用)"
+        spellcheck="false"
+      />
+      <div v-show="showPreview" class="note-editor__preview preview-content" v-html="previewHtml"></div>
+    </div>
     <TableOfContents 
       :content="content"
       :container="mainContainerRef"
@@ -315,6 +583,13 @@ onUnmounted(() => {
   justify-content: space-between;
   height: auto;
   min-height: 64px;
+  gap: 12px;
+}
+
+.note-editor__header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .note-editor__back-button {
@@ -341,6 +616,35 @@ onUnmounted(() => {
 }
 
 .note-editor__back-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.note-editor__preview-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #f3f4f6;
+  border: none;
+  border-radius: 6px;
+  color: #374151;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.note-editor__preview-toggle:hover {
+  background: #e5e7eb;
+}
+
+.note-editor__preview-toggle--active {
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+  color: #ffffff;
+}
+
+.note-editor__preview-icon {
   width: 16px;
   height: 16px;
 }
@@ -398,6 +702,22 @@ onUnmounted(() => {
   height: 16px;
 }
 
+.note-editor__body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.note-editor__body--preview-on {
+  display: flex;
+}
+
+.note-editor__body--preview-on .note-editor__textarea {
+  flex: 1;
+  min-width: 0;
+  border-right: 1px solid var(--border-color);
+}
+
 .note-editor__textarea {
   flex: 1;
   width: 100%;
@@ -410,58 +730,130 @@ onUnmounted(() => {
   line-height: 1.8;
   color: #000000;
   background: #ffffff;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.note-editor__textarea::-webkit-scrollbar {
+  display: none;
 }
 
 .note-editor__textarea::placeholder {
   color: #9ca3af;
 }
 
+:deep(.note-editor__preview) {
+  flex: 1;
+  min-width: 0;
+  padding: 24px;
+  overflow-y: auto;
+  background: #ffffff;
+  font-size: 16px;
+  line-height: 1.9;
+  color: #000000;
+}
+
 @media (max-width: 768px) {
   .note-editor__header {
-    padding: 12px 16px;
-    height: auto;
+    padding: 10px 12px;
     min-height: 48px;
-    flex-wrap: wrap;
-    gap: 12px;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .note-editor__header-left {
+    gap: 6px;
+    flex-shrink: 0;
   }
 
   .note-editor__back-button {
-    padding: 6px 12px;
-    font-size: 13px;
+    padding: 8px 10px;
+    font-size: 0;
+  }
+
+  .note-editor__back-text {
+    display: none;
   }
 
   .note-editor__back-icon {
-    width: 14px;
-    height: 14px;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+  }
+
+  .note-editor__preview-toggle {
+    padding: 8px 10px;
+    font-size: 0;
+  }
+
+  .note-editor__preview-text {
+    display: none;
+  }
+
+  .note-editor__preview-icon {
+    width: 18px;
+    height: 18px;
   }
 
   .note-editor__info {
-    flex-wrap: wrap;
-    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    justify-content: flex-end;
+    gap: 6px;
   }
 
   .note-editor__info-text {
     font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 72px;
+  }
+
+  .note-editor__info-text:first-child {
+    max-width: 90px;
   }
 
   .note-editor__info-divider {
-    font-size: 11px;
+    font-size: 10px;
+    flex-shrink: 0;
   }
 
   .note-editor__save-button {
-    padding: 6px 12px;
-    font-size: 13px;
+    padding: 8px 10px;
+    font-size: 0;
+    flex-shrink: 0;
+  }
+
+  .note-editor__save-text {
+    display: none;
   }
 
   .note-editor__save-icon {
-    width: 14px;
-    height: 14px;
+    width: 20px;
+    height: 20px;
+  }
+
+  .note-editor__body {
+    flex-direction: column;
+  }
+
+  .note-editor__body--preview-on .note-editor__textarea,
+  .note-editor__body--preview-on .note-editor__preview {
+    min-width: 100%;
+    flex: 1;
   }
 
   .note-editor__textarea {
-    padding: 16px;
+    padding: 12px;
     font-size: 14px;
     line-height: 1.6;
+  }
+
+  .note-editor__preview {
+    padding: 12px;
+    font-size: 14px;
   }
 }
 </style>

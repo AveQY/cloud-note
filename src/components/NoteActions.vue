@@ -124,13 +124,13 @@ const handleAlertClose = () => {
       </div>
     </div>
     <div v-if="!isEditing" class="note-actions__buttons">
-      <button class="note-actions__button note-actions__button--share" @click="handleShare">
+      <button class="note-actions__button note-actions__button--share" @click="handleShare" title="分享">
         <svg class="note-actions__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M4 12V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           <path d="M16 6L12 2L8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           <path d="M12 2V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        分享
+        <span class="note-actions__share-text">分享</span>
       </button>
     </div>
     <ShareExpireDialog
@@ -261,26 +261,68 @@ const handleAlertClose = () => {
 
 @media (max-width: 768px) {
   .note-actions {
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: nowrap;
     gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .note-actions__info {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
   }
 
   .note-actions__title {
     font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .note-actions__meta {
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-wrap: nowrap;
+    gap: 4px;
+    overflow: hidden;
+    align-items: center;
   }
 
   .note-actions__meta-item {
     font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 72px;
+  }
+
+  .note-actions__meta-item:first-child {
+    max-width: 90px;
   }
 
   .note-actions__meta-divider {
-    font-size: 11px;
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+
+  .note-actions__buttons {
+    margin-left: 0;
+    flex-shrink: 0;
+  }
+
+  .note-actions__button--share {
+    padding: 8px 10px;
+    font-size: 0;
+  }
+
+  .note-actions__share-text {
+    display: none;
+  }
+
+  .note-actions__button--share .note-actions__icon {
+    width: 20px;
+    height: 20px;
   }
 }
 </style>

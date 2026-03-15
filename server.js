@@ -1,11 +1,12 @@
 import express from 'express'
 import fs from 'fs'
 import path from 'path'
-import { readdirSync, statSync, writeFileSync, unlinkSync, existsSync, renameSync, mkdirSync, readFileSync } from 'fs'
+import { readdirSync, statSync, writeFileSync, unlinkSync, existsSync, renameSync, mkdirSync, readFileSync, copyFileSync } from 'fs'
 import { join, extname } from 'path'
 import { fileURLToPath } from 'url'
 import { dirname } from 'path'
 import multer from 'multer'
+import archiver from 'archiver'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -91,7 +92,14 @@ const generateShareId = () => {
 }
 
 const getSharesData = () => {
-  const sharesPath = join(__dirname, 'log', 'shares.json')
+  const logDir = join(__dirname, 'log')
+  const sharesPath = join(logDir, 'shares.json')
+
+  // Ensure log directory exists
+  if (!existsSync(logDir)) {
+    mkdirSync(logDir, { recursive: true })
+  }
+
   if (!existsSync(sharesPath)) {
     writeFileSync(sharesPath, '{}', 'utf-8')
     return {}
@@ -105,7 +113,14 @@ const getSharesData = () => {
 }
 
 const saveSharesData = (data) => {
-  const sharesPath = join(__dirname, 'log', 'shares.json')
+  const logDir = join(__dirname, 'log')
+  const sharesPath = join(logDir, 'shares.json')
+
+  // Ensure log directory exists
+  if (!existsSync(logDir)) {
+    mkdirSync(logDir, { recursive: true })
+  }
+
   writeFileSync(sharesPath, JSON.stringify(data, null, 2), 'utf-8')
 }
 
@@ -180,12 +195,15 @@ const loadFileList = () => {
     .map(filename => {
       const filePath = join(fileDir, filename)
       const stats = statSync(filePath)
+      const birthtime = stats.birthtime && stats.birthtime.getTime ? stats.birthtime.getTime() : stats.mtime.getTime()
       return {
         filename,
         title: filename.replace(/\.md$/, ''),
         path: `/file/${filename}`,
         size: stats.size,
-        lastModified: stats.mtime.getTime()
+        lastModified: stats.mtime.getTime(),
+        createdAt: birthtime,
+        updatedAt: stats.mtime.getTime()
       }
     })
     .sort((a, b) => b.lastModified - a.lastModified)
@@ -214,7 +232,7 @@ app.get('/api/captcha', (req, res) => {
 app.post('/api/login', (req, res) => {
   try {
     const { username, password, captchaId, captchaCode } = req.body
-    
+
     if (!username || !password || !captchaId || !captchaCode) {
       return res.status(400).json({ success: false, message: '缺少必要参数' })
     }
@@ -233,28 +251,75 @@ app.post('/api/login', (req, res) => {
 
     const logDir = join(__dirname, 'log')
     const loginFilePath = join(logDir, 'login')
-    
+
+    // Ensure log directory exists
+    if (!existsSync(logDir)) {
+      mkdirSync(logDir, { recursive: true })
+    }
+
+    // Create login file with default credentials if it doesn't exist
     if (!existsSync(loginFilePath)) {
-      return res.status(500).json({ success: false, message: '登录配置文件不存在' })
+      writeFileSync(loginFilePath, '[admin]:[admin123]', 'utf-8')
     }
 
     const loginContent = readFileSync(loginFilePath, 'utf-8')
     const match = loginContent.match(/\[([^\]]+)\]:\[([^\]]+)\]/)
-    
+
     if (!match) {
       return res.status(500).json({ success: false, message: '登录配置格式错误' })
     }
 
     const validUsername = match[1]
     const validPassword = match[2]
-    
+
     if (username === validUsername && password === validPassword) {
       res.json({ success: true, message: '登录成功' })
     } else {
       res.status(401).json({ success: false, message: '账号或密码错误' })
     }
   } catch (error) {
+    console.error('login error:', error)
     res.status(500).json({ success: false, message: '登录验证失败' })
+  }
+})
+
+app.post('/api/update-login', (req, res) => {
+  try {
+    const { currentPassword, newUsername, newPassword } = req.body
+    if (!currentPassword || !newUsername || !newPassword) {
+      return res.status(400).json({ success: false, message: '缺少必要参数' })
+    }
+
+    const logDir = join(__dirname, 'log')
+    const loginFilePath = join(logDir, 'login')
+
+    // Ensure log directory exists
+    if (!existsSync(logDir)) {
+      mkdirSync(logDir, { recursive: true })
+    }
+
+    // Create login file with default credentials if it doesn't exist
+    if (!existsSync(loginFilePath)) {
+      writeFileSync(loginFilePath, '[admin]:[admin123]', 'utf-8')
+    }
+
+    const loginContent = readFileSync(loginFilePath, 'utf-8')
+    const match = loginContent.match(/\[([^\]]+)\]:\[([^\]]+)\]/)
+    if (!match) {
+      return res.status(500).json({ success: false, message: '登录配置格式错误' })
+    }
+
+    const validPassword = match[2]
+    if (currentPassword !== validPassword) {
+      return res.status(401).json({ success: false, message: '当前密码错误' })
+    }
+
+    const newContent = `[${newUsername}]:[${newPassword}]`
+    writeFileSync(loginFilePath, newContent, 'utf-8')
+    res.json({ success: true, message: '修改成功，请使用新账号重新登录' })
+  } catch (error) {
+    console.error('update-login error:', error)
+    res.status(500).json({ success: false, message: '修改失败' })
   }
 })
 
@@ -434,7 +499,9 @@ app.post('/api/create', (req, res) => {
       filename,
       title: title,
       path: `/file/${filename}`,
-      lastModified: stats.mtime.getTime()
+      lastModified: stats.mtime.getTime(),
+      createdAt: (stats.birthtime && stats.birthtime.getTime ? stats.birthtime.getTime() : stats.mtime.getTime()),
+      updatedAt: stats.mtime.getTime()
     }
     
     res.json({ success: true, note })
@@ -626,6 +693,135 @@ app.get('/api/share/:shareId', (req, res) => {
     res.json({ content, filename: shareData.filename })
   } catch (error) {
     res.status(500).json({ error: '获取分享内容失败' })
+  }
+})
+
+const fileDirForBackup = join(__dirname, 'file')
+const logDirForBackup = join(__dirname, 'log')
+
+app.get('/api/backup', (req, res) => {
+  try {
+    const type = req.query.type || 'all'
+    if (!['notes', 'data', 'all'].includes(type)) {
+      return res.status(400).json({ error: '无效的备份类型' })
+    }
+
+    const zip = archiver('zip', { zlib: { level: 9 } })
+    
+    // 监听 archiver 错误
+    zip.on('error', (err) => {
+      console.error('Archiver error:', err)
+      res.status(500).json({ error: '备份失败：' + err.message })
+    })
+    
+    res.attachment(`backup-${type}-${Date.now()}.zip`)
+    res.setHeader('Content-Type', 'application/zip')
+    zip.pipe(res)
+
+    if (type === 'notes' || type === 'all') {
+      if (existsSync(fileDirForBackup)) {
+        zip.directory(fileDirForBackup, type === 'all' ? 'file' : false)
+      }
+    }
+    if (type === 'data' || type === 'all') {
+      if (existsSync(logDirForBackup)) {
+        zip.directory(logDirForBackup, type === 'all' ? 'log' : false)
+      }
+    }
+
+    zip.finalize()
+  } catch (error) {
+    console.error('Backup error:', error)
+    res.status(500).json({ error: '备份失败：' + error.message })
+  }
+})
+
+const tempUploadDir = join(__dirname, 'temp-upload')
+if (!existsSync(tempUploadDir)) {
+  mkdirSync(tempUploadDir, { recursive: true })
+}
+const restoreUpload = multer({ dest: tempUploadDir })
+
+app.post('/api/restore', restoreUpload.single('file'), async (req, res) => {
+  let tempExtractDir = ''
+  try {
+    const file = req.file
+    if (!file || !file.path) {
+      return res.status(400).json({ success: false, message: '请上传备份文件' })
+    }
+
+    tempExtractDir = join(__dirname, `temp-extract-${Date.now()}`)
+    mkdirSync(tempExtractDir, { recursive: true })
+
+    try {
+      const { default: extract } = await import('extract-zip')
+      await extract(file.path, { dir: tempExtractDir })
+    } catch (e) {
+      if (existsSync(file.path)) unlinkSync(file.path)
+      return res.status(400).json({ success: false, message: '无效的备份文件或解压失败' })
+    }
+
+    let dataRestored = false
+    const extractedFileDir = join(tempExtractDir, 'file')
+    const extractedLogDir = join(tempExtractDir, 'log')
+
+    if (existsSync(extractedFileDir)) {
+      mkdirSync(fileDirForBackup, { recursive: true })
+      const files = readdirSync(extractedFileDir)
+      for (const name of files) {
+        const src = join(extractedFileDir, name)
+        if (statSync(src).isFile()) {
+          copyFileSync(src, join(fileDirForBackup, name))
+        }
+      }
+    } else {
+      const rootFiles = readdirSync(tempExtractDir)
+      const mdFiles = rootFiles.filter(f => statSync(join(tempExtractDir, f)).isFile() && f.endsWith('.md'))
+      if (mdFiles.length > 0) {
+        mkdirSync(fileDirForBackup, { recursive: true })
+        for (const name of mdFiles) {
+          copyFileSync(join(tempExtractDir, name), join(fileDirForBackup, name))
+        }
+      }
+    }
+
+    if (existsSync(extractedLogDir)) {
+      dataRestored = true
+      mkdirSync(logDirForBackup, { recursive: true })
+      const logFiles = readdirSync(extractedLogDir)
+      for (const name of logFiles) {
+        const src = join(extractedLogDir, name)
+        if (statSync(src).isFile()) {
+          copyFileSync(src, join(logDirForBackup, name))
+        }
+      }
+    } else {
+      const rootItems = readdirSync(tempExtractDir)
+      if (rootItems.some(f => f === 'login' || f === 'shares.json')) {
+        dataRestored = true
+        mkdirSync(logDirForBackup, { recursive: true })
+        for (const name of rootItems) {
+          const src = join(tempExtractDir, name)
+          if (statSync(src).isFile()) {
+            copyFileSync(src, join(logDirForBackup, name))
+          }
+        }
+      }
+    }
+
+    if (existsSync(file.path)) unlinkSync(file.path)
+    const { rmSync } = await import('fs')
+    if (tempExtractDir && existsSync(tempExtractDir)) {
+      rmSync(tempExtractDir, { recursive: true, force: true })
+    }
+
+    res.json({ success: true, dataRestored })
+  } catch (error) {
+    if (tempExtractDir && existsSync(tempExtractDir)) {
+      const { rmSync } = await import('fs')
+      rmSync(tempExtractDir, { recursive: true, force: true })
+    }
+    res.status(500).json({ success: false, message: '恢复失败' })
   }
 })
 

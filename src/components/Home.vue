@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import NoteList from './NoteList.vue'
 import NoteContent from './NoteContent.vue'
 import NoteActions from './NoteActions.vue'
 import InfoDialog from './InfoDialog.vue'
 import DropdownMenu from './DropdownMenu.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import type { Note } from '@/types'
 
 const router = useRouter()
@@ -16,11 +17,22 @@ const saving = ref(false)
 const refreshKey = ref(0)
 const noteListRef = ref<InstanceType<typeof NoteList> | null>(null)
 const currentNoteContent = ref('')
+const editingContent = ref('')
+const initialEditContent = ref('')
+const pendingNote = ref<Note | null>(null)
+const showUnsavedDialog = ref(false)
 const showSidebar = ref(true)
 const showAboutDialog = ref(false)
 const aboutContent = ref('')
 
+const isDirty = computed(() => isEditing.value && editingContent.value !== initialEditContent.value)
+
 const handleSelectNote = (note: Note) => {
+  if (isEditing.value && isDirty.value) {
+    pendingNote.value = note
+    showUnsavedDialog.value = true
+    return
+  }
   selectedNote.value = note
   isEditing.value = false
   showSidebar.value = false
@@ -28,12 +40,38 @@ const handleSelectNote = (note: Note) => {
 
 const handleEditNote = (note: Note) => {
   selectedNote.value = note
+  initialEditContent.value = currentNoteContent.value
   isEditing.value = true
   showSidebar.value = false
 }
 
 const handleEdit = () => {
+  initialEditContent.value = currentNoteContent.value
   isEditing.value = true
+}
+
+const applyPendingNote = () => {
+  if (pendingNote.value) {
+    selectedNote.value = pendingNote.value
+    pendingNote.value = null
+  }
+  isEditing.value = false
+  showUnsavedDialog.value = false
+  showSidebar.value = false
+}
+
+const handleUnsavedSave = async () => {
+  await handleSave(editingContent.value)
+  applyPendingNote()
+}
+
+const handleUnsavedDiscard = () => {
+  applyPendingNote()
+}
+
+const handleUnsavedCancel = () => {
+  showUnsavedDialog.value = false
+  pendingNote.value = null
 }
 
 const handleBackToList = () => {
@@ -50,9 +88,9 @@ const handleNoteDeleted = () => {
   }
 }
 
-const handleSave = async (content: string) => {
+const handleSave = async (content: string, isAutoSave: boolean = false) => {
   if (!selectedNote.value) return
-  
+
   saving.value = true
   try {
     const response = await fetch('/api/save', {
@@ -65,13 +103,25 @@ const handleSave = async (content: string) => {
         content: content
       })
     })
-    
+
     if (!response.ok) {
       throw new Error('保存失败')
     }
-    
-    refreshKey.value++
-    isEditing.value = false
+
+    const savedAt = new Date()
+    if (selectedNote.value) {
+      selectedNote.value.updatedAt = savedAt
+    }
+
+    // Only refresh key on manual save, not auto-save
+    if (!isAutoSave && !showUnsavedDialog.value) {
+      refreshKey.value++
+    }
+
+    // Only exit edit mode if this is not an auto-save
+    if (!isAutoSave && !showUnsavedDialog.value) {
+      isEditing.value = false
+    }
   } catch (e) {
     console.error('保存失败:', e)
     alert('保存失败，请重试')
@@ -102,28 +152,20 @@ const handleCloseAbout = () => {
   showAboutDialog.value = false
 }
 
-const handleLogout = () => {
-  localStorage.removeItem('isLoggedIn')
-  localStorage.removeItem('username')
-  localStorage.removeItem('loginTime')
-  localStorage.removeItem('expireTime')
-  router.push('/login')
-}
-
 const menuItems = [
   {
     id: 'markdown',
-    label: 'Markdown语法',
+    label: 'Markdown 语法',
     icon: '<path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C7.59 4 4 7.59 4 12C4 16.41 7.59 20 12 20ZM11 7H13V9H11V7ZM13 17H11V11H13V17Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
     onClick: () => {
       window.open('https://www.markdown.cn/docs/cheat-sheet', '_blank')
     }
   },
   {
-    id: 'logout',
-    label: '退出登录',
-    icon: '<path d="M9 21H5C4.46957 21 4 20.5304 4 20V4C4 3.46957 4.46957 3 5 3H9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 17V19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 9L16 14L11 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-    onClick: handleLogout
+    id: 'settings',
+    label: '设置',
+    icon: '<path d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M19.4 15A1.65 1.65 0 0020 12a1.65 1.65 0 00-.6-3l2.1-1.6c.2-.15.25-.4.15-.6l-2-3.4a.5.5 0 00-.6-.2l-2.4 1a1.65 1.65 0 00-1.6-1L12 1h-2l-.5 3.1a1.65 1.65 0 00-1.6 1l-2.4-1a.5.5 0 00-.6.2l-2 3.4c-.1.2-.05.45.15.6L4.6 9A1.65 1.65 0 004 12a1.65 1.65 0 00.6 3l-2.1 1.6c-.2.15-.25.4-.15.6l2 3.4c.1.2.35.25.55.15l2.5-1a1.65 1.65 0 001.6 1L12 21h2l.5-3.1a1.65 1.65 0 001.6-1l2.4 1c.2.1.45 0 .55-.15l2-3.4c.1-.2.05-.45-.15-.6L19.4 15z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+    onClick: () => router.push('/settings')
   }
 ]
 </script>
@@ -135,7 +177,7 @@ const menuItems = [
         <div class="home__title" @click="handleShowAbout">云笔记</div>
         <DropdownMenu :items="menuItems" icon-type="dots" />
       </div>
-      <NoteList 
+      <NoteList
         ref="noteListRef"
         v-model:search-keyword="searchKeyword"
         :selected-note="selectedNote"
@@ -151,22 +193,23 @@ const menuItems = [
             <path d="M19 12H5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M12 19L5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          返回
+          <span class="home__back-text">返回</span>
         </button>
-        <NoteActions 
+        <NoteActions
           :is-editing="isEditing"
           :note="selectedNote"
           :content="currentNoteContent"
           @edit="handleEdit"
         />
       </div>
-      <NoteContent 
-        :note="selectedNote" 
-        :is-editing="isEditing" 
+      <NoteContent
+        :note="selectedNote"
+        :is-editing="isEditing"
         :refresh-key="refreshKey"
-        @save="handleSave"
+        @save="(content, isAutoSave) => handleSave(content, isAutoSave || false)"
         @cancel="handleBackToList"
         @content-loaded="currentNoteContent = $event"
+        @update:editing-content="editingContent = $event"
       />
     </main>
     <InfoDialog
@@ -174,6 +217,18 @@ const menuItems = [
       title="关于"
       :content="aboutContent"
       @close="handleCloseAbout"
+    />
+    <ConfirmDialog
+      :show="showUnsavedDialog"
+      title="未保存的更改"
+      message="当前笔记有未保存的更改，是否保存后再切换？"
+      confirm-text="保存"
+      cancel-text="取消"
+      discard-text="不保存"
+      type="warning"
+      @confirm="handleUnsavedSave"
+      @cancel="handleUnsavedCancel"
+      @discard="handleUnsavedDiscard"
     />
   </div>
 </template>
@@ -186,7 +241,7 @@ const menuItems = [
 }
 
 .home__sidebar {
-  width: 320px;
+  width: 360px;
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
@@ -196,7 +251,7 @@ const menuItems = [
 }
 
 .home__sidebar-header {
-  padding: 18px 24px;
+  padding: 18px 32px;
   border-bottom: 1px solid var(--border-color);
   background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
   display: flex;
@@ -299,20 +354,31 @@ const menuItems = [
   }
 
   .home__main-header {
-    padding: 12px 16px;
-    height: auto;
+    padding: 10px 12px;
     min-height: 48px;
-    gap: 12px;
+    gap: 8px;
+    flex-wrap: nowrap;
+    align-items: center;
   }
 
   .home__back-button {
-    padding: 6px 12px;
-    font-size: 13px;
+    padding: 8px 10px;
+    font-size: 0;
+    flex-shrink: 0;
+    margin-right: 4px;
+  }
+
+  .home__back-text {
+    display: none;
+  }
+
+  .home__back-button .home__back-icon {
+    margin: 0;
   }
 
   .home__back-icon {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
   }
 
   .home__title {

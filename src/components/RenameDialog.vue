@@ -36,10 +36,6 @@ const handleCancel = () => {
   emit('cancel')
 }
 
-const handleBackdropClick = () => {
-  emit('cancel')
-}
-
 const handleKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Enter') {
     handleConfirm()
@@ -52,7 +48,7 @@ const handleKeydown = (event: KeyboardEvent) => {
 <template>
   <Teleport to="body">
     <Transition name="dialog-fade">
-      <div v-if="show" class="rename-dialog-overlay" @click="handleBackdropClick">
+      <div v-if="show" class="rename-dialog-overlay" @click.stop>
         <Transition name="dialog-slide">
           <div v-if="show" class="rename-dialog" @click.stop @keydown="handleKeydown">
             <div class="rename-dialog__header">

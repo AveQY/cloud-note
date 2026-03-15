@@ -35,10 +35,6 @@ const handleCancel = () => {
   emit('cancel')
 }
 
-const handleBackdropClick = () => {
-  handleCancel()
-}
-
 const handleKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Escape') {
     handleCancel()
@@ -49,12 +45,16 @@ const handleKeydown = (event: KeyboardEvent) => {
 <template>
   <Teleport to="body">
     <Transition name="dialog-fade">
-      <div v-if="show" class="share-expire-dialog-overlay" @click="handleBackdropClick">
+      <div v-if="show" class="share-expire-dialog-overlay">
         <Transition name="dialog-slide">
           <div v-if="show" class="share-expire-dialog" @click.stop @keydown="handleKeydown">
             <div class="share-expire-dialog__header">
               <h3 class="share-expire-dialog__title">选择分享有效期</h3>
-              <p class="share-expire-dialog__subtitle">请设置分享链接的有效期</p>
+              <button class="share-expire-dialog__close" @click="handleCancel">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
             </div>
             <div class="share-expire-dialog__body">
               <div class="share-expire-dialog__options">
@@ -122,7 +122,10 @@ const handleKeydown = (event: KeyboardEvent) => {
 
 .share-expire-dialog__header {
   padding: 24px 24px 16px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .share-expire-dialog__title {
@@ -204,6 +207,30 @@ const handleKeydown = (event: KeyboardEvent) => {
   font-size: 13px;
   color: var(--text-secondary);
   margin: 0;
+}
+
+.share-expire-dialog__close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  color: var(--text-secondary);
+}
+
+.share-expire-dialog__close:hover {
+  background: var(--bg-color);
+  color: var(--text-primary);
+}
+
+.share-expire-dialog__close svg {
+  width: 20px;
+  height: 20px;
 }
 
 .dialog-fade-enter-active,

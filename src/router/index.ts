@@ -14,6 +14,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/settings',
+    name: 'Settings',
+    component: () => import('@/components/SettingsPage.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/share/:shareId',
     name: 'Share',
     component: () => import('@/components/SharePage.vue'),

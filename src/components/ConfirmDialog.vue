@@ -5,12 +5,14 @@ interface Props {
   message?: string
   confirmText?: string
   cancelText?: string
+  discardText?: string
   type?: 'danger' | 'warning' | 'info'
 }
 
 interface Emits {
   confirm: []
   cancel: []
+  discard: []
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -19,6 +21,7 @@ const props = withDefaults(defineProps<Props>(), {
   message: '确定要执行此操作吗？',
   confirmText: '确定',
   cancelText: '取消',
+  discardText: '',
   type: 'danger'
 })
 
@@ -32,14 +35,14 @@ const handleCancel = () => {
   emit('cancel')
 }
 
-const handleBackdropClick = () => {
-  emit('cancel')
+const handleDiscard = () => {
+  emit('discard')
 }
 </script>
 
 <template>
   <Transition name="dialog-fade">
-    <div v-if="show" class="confirm-dialog-overlay" @click="handleBackdropClick">
+    <div v-if="show" class="confirm-dialog-overlay">
       <Transition name="dialog-slide">
         <div v-if="show" class="confirm-dialog" @click.stop>
           <div class="confirm-dialog__header">
@@ -68,6 +71,13 @@ const handleBackdropClick = () => {
           <div class="confirm-dialog__footer">
             <button class="confirm-dialog__button confirm-dialog__button--cancel" @click="handleCancel">
               {{ cancelText }}
+            </button>
+            <button
+              v-if="discardText"
+              class="confirm-dialog__button confirm-dialog__button--discard"
+              @click="handleDiscard"
+            >
+              {{ discardText }}
             </button>
             <button 
               class="confirm-dialog__button confirm-dialog__button--confirm"
@@ -190,6 +200,17 @@ const handleBackdropClick = () => {
 .confirm-dialog__button--cancel:hover {
   background: var(--bg-color);
   color: var(--text-primary);
+}
+
+.confirm-dialog__button--discard {
+  background: #fef3c7;
+  color: #d97706;
+  border: 1px solid #fcd34d;
+}
+
+.confirm-dialog__button--discard:hover {
+  background: #fde68a;
+  color: #b45309;
 }
 
 .confirm-dialog__button--confirm {
