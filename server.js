@@ -198,7 +198,7 @@ const loadFileList = () => {
       const birthtime = stats.birthtime && stats.birthtime.getTime ? stats.birthtime.getTime() : stats.mtime.getTime()
       return {
         filename,
-        title: filename.replace(/\.md$/, ''),
+        title: filename.replace(/\d{13}\.md$/, '').replace(/\.md$/, ''),
         path: `/file/${filename}`,
         size: stats.size,
         lastModified: stats.mtime.getTime(),
@@ -482,18 +482,17 @@ app.post('/api/create', (req, res) => {
     }
 
     const fileDir = join(__dirname, 'file')
-    const timestamp = Date.now()
     let filename = `${title}.md`
     let filePath = join(fileDir, filename)
     
     if (existsSync(filePath)) {
-      filename = `${title}${timestamp}.md`
-      filePath = join(fileDir, filename)
+      return res.status(400).json({ error: '笔记名称已存在，请更换一个名称' })
     }
     
     writeFileSync(filePath, '', 'utf-8')
     
     const stats = statSync(filePath)
+    const timestamp = stats.mtime.getTime()
     const note = {
       id: `${timestamp}`,
       filename,
@@ -527,8 +526,7 @@ app.post('/api/rename', (req, res) => {
     }
     
     if (existsSync(newFilePath)) {
-      const timestamp = Date.now()
-      newFilename = `${newTitle}${timestamp}.md`
+      return res.status(400).json({ error: '笔记名称已存在，请更换一个名称' })
     }
     
     renameSync(oldFilePath, join(__dirname, 'file', newFilename))
@@ -613,18 +611,29 @@ app.post('/api/upload', (req, res) => {
 
 app.post('/api/upload-image', upload.single('file'), (req, res) => {
   try {
+    console.log('upload-image 请求:', { 
+      hasFile: !!req.file, 
+      file: req.file ? { 
+        filename: req.file.filename, 
+        originalname: req.file.originalname, 
+        size: req.file.size 
+      } : null 
+    })
+    
     const file = req.file
-    const notePath = req.body.notePath
 
     if (!file) {
+      console.log('上传失败: 没有文件')
       return res.status(400).json({ error: '缺少必要参数' })
     }
 
     const imageUrl = `/image/${file.filename}`
+    console.log('上传成功:', imageUrl)
 
     res.setHeader('Content-Type', 'application/json')
     res.status(200).json({ success: true, imageUrl })
   } catch (error) {
+    console.error('上传图片失败:', error)
     res.status(500).json({ error: '上传图片失败' })
   }
 })

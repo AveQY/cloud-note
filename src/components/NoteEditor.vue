@@ -259,13 +259,16 @@ const handlePaste = async (event: ClipboardEvent) => {
         isUploading.value = true
         const formData = new FormData()
         formData.append('file', file)
+        console.log('上传图片:', file.name, file.type, file.size)
 
         const response = await fetch('/api/upload-image', {
           method: 'POST',
           body: formData
         })
 
+        console.log('响应状态:', response.status, response.ok)
         const result = await response.json()
+        console.log('响应数据:', result)
 
         if (result.success && result.imageUrl) {
           const imageMarkdown = `

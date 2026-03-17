@@ -133,7 +133,8 @@ const handleConfirmCreateNote = async (title: string) => {
     })
     
     if (!response.ok) {
-      throw new Error('创建失败')
+      const data = await response.json()
+      throw new Error(data.error || '创建失败')
     }
     
     const data = await response.json()
@@ -144,9 +145,9 @@ const handleConfirmCreateNote = async (title: string) => {
     }
     
     showCreateDialog.value = false
-  } catch (e) {
+  } catch (e: any) {
     console.error('创建笔记失败:', e)
-    alert('创建笔记失败，请重试')
+    alert(e.message || '创建笔记失败，请重试')
   }
 }
 
@@ -223,7 +224,8 @@ const handleConfirmRename = async (newTitle: string) => {
     })
     
     if (!response.ok) {
-      throw new Error('重命名失败')
+      const data = await response.json()
+      throw new Error(data.error || '重命名失败')
     }
     
     const data = await response.json()
@@ -235,9 +237,9 @@ const handleConfirmRename = async (newTitle: string) => {
     
     showRenameDialog.value = false
     renamingNote.value = null
-  } catch (e) {
+  } catch (e: any) {
     console.error('重命名失败:', e)
-    alert('重命名失败，请重试')
+    alert(e.message || '重命名失败，请重试')
   }
 }
 
