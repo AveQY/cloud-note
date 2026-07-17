@@ -3,7 +3,6 @@ import { ref, watch, nextTick } from 'vue'
 import MarkdownIt from 'markdown-it'
 import TaskLists from 'markdown-it-task-lists'
 import NoteEditor from './NoteEditor.vue'
-import TableOfContents from './TableOfContents.vue'
 import '@/styles/preview.css'
 import type { Note } from '@/types'
 
@@ -48,6 +47,34 @@ const md = new MarkdownIt({
     labelAfter: false
   })
 
+// Add a stable unique data-heading attribute so duplicate titles remain distinguishable
+const headingId = (text: string) => text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-') || 'heading'
+
+interface MarkdownRenderEnv {
+  headingSlugCounts?: Map<string, number>
+}
+
+const uniqueHeadingId = (text: string, env: MarkdownRenderEnv) => {
+  const baseId = headingId(text)
+  const counts = env.headingSlugCounts || (env.headingSlugCounts = new Map<string, number>())
+  const occurrence = (counts.get(baseId) || 0) + 1
+  counts.set(baseId, occurrence)
+  return occurrence === 1 ? baseId : `${baseId}-${occurrence}`
+}
+
+const defaultHeadingRender = md.renderer.rules.heading_open || function (tokens, idx, options, env, self) {
+  return self.renderToken(tokens, idx, options)
+}
+
+md.renderer.rules.heading_open = function (tokens, idx, options, env: MarkdownRenderEnv, self) {
+  const token = tokens[idx]
+  const nextToken = tokens[idx + 1]
+  if (nextToken && nextToken.type === 'inline') {
+    token.attrSet('data-heading', uniqueHeadingId(nextToken.content, env))
+  }
+  return defaultHeadingRender(tokens, idx, options, env, self)
+}
+
 md.renderer.rules.image = function (tokens, idx, options, env, self) {
   const token = tokens[idx]
   const src = token.attrGet('src')
@@ -78,7 +105,7 @@ const loadNoteContent = async () => {
     }
     const markdown = await response.text()
     markdownContent.value = markdown
-    const rendered = md.render(markdown)
+    const rendered = md.render(markdown, { headingSlugCounts: new Map<string, number>() })
     content.value = rendered
     
     emit('contentLoaded', markdown)
@@ -147,6 +174,10 @@ watch(
   },
   { immediate: true }
 )
+
+defineExpose({
+  mainContainerRef
+})
 </script>
 
 <template>
@@ -184,11 +215,6 @@ watch(
     <div v-else class="note-content__wrapper">
       <div class="note-content__body preview-content" ref="contentBodyRef" v-html="content"></div>
     </div>
-    <TableOfContents 
-      v-if="!isEditing && note && !loading && !error"
-      :content="markdownContent"
-      :container="mainContainerRef"
-    />
   </div>
 </template>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import NoteList from './NoteList.vue'
 import NoteContent from './NoteContent.vue'
@@ -16,6 +16,7 @@ const isEditing = ref(false)
 const saving = ref(false)
 const refreshKey = ref(0)
 const noteListRef = ref<InstanceType<typeof NoteList> | null>(null)
+const noteContentRef = ref<InstanceType<typeof NoteContent> | null>(null)
 const currentNoteContent = ref('')
 const editingContent = ref('')
 const initialEditContent = ref('')
@@ -24,6 +25,131 @@ const showUnsavedDialog = ref(false)
 const showSidebar = ref(true)
 const showAboutDialog = ref(false)
 const aboutContent = ref('')
+const activeHeadingId = ref('')
+
+interface HeadingItem {
+  id: string
+  text: string
+  level: number
+}
+
+const createUniqueHeadingId = (text: string, counts: Map<string, number>) => {
+  const baseId = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-') || 'heading'
+  const occurrence = (counts.get(baseId) || 0) + 1
+  counts.set(baseId, occurrence)
+  return occurrence === 1 ? baseId : `${baseId}-${occurrence}`
+}
+
+const headings = computed(() => {
+  const content = isEditing.value ? editingContent.value : currentNoteContent.value
+  if (!content) return []
+  const lines = content.split(/[\r\n]+/)
+  const result: HeadingItem[] = []
+  const counts = new Map<string, number>()
+  lines.forEach((line) => {
+    const match = line.match(/^(#{1,6})\s+(.+)$/)
+    if (match) {
+      const level = match[1].length
+      const text = match[2].trim()
+      const id = createUniqueHeadingId(text, counts)
+      result.push({ id, text, level })
+    }
+  })
+  return result
+})
+
+const scrollToHeading = (id: string) => {
+  const container = noteContentRef.value?.mainContainerRef
+  if (!container) return
+
+  if (isEditing.value) {
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null
+    if (!textarea) return
+    const content = editingContent.value
+    const lines = content.split(/[\r\n]+/)
+    const counts = new Map<string, number>()
+    let offset = 0
+    for (const line of lines) {
+      const match = line.match(/^(#{1,6})\s+(.+)$/)
+      if (match) {
+        const headingId = createUniqueHeadingId(match[2].trim(), counts)
+        if (headingId === id) {
+          textarea.focus()
+          textarea.setSelectionRange(offset, offset + line.length)
+          const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 24
+          const lineIndex = content.slice(0, offset).split(/[\r\n]+/).length - 1
+          textarea.scrollTo({ top: Math.max(0, lineIndex * lineHeight - 80), behavior: 'smooth' })
+          activeHeadingId.value = id
+          return
+        }
+      }
+      offset += line.length + 1
+    }
+    return
+  }
+
+  const element = container.querySelector(`[data-heading="${id}"]`)
+  if (element) {
+    element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  // Fallback: rebuild the same unique IDs in document order
+  const headingElements = Array.from(container.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+  const counts = new Map<string, number>()
+  for (const el of headingElements) {
+    const text = el.textContent?.trim() || ''
+    const headingId = createUniqueHeadingId(text, counts)
+    if (headingId === id) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      break
+    }
+  }
+}
+
+const updateActiveHeading = () => {
+  const container = noteContentRef.value?.mainContainerRef
+  if (!container) return
+  const headingElements = Array.from(container.querySelectorAll('[data-heading]'))
+  const containerRect = container.getBoundingClientRect()
+  const offset = 100
+  let activeId = ''
+  for (let i = headingElements.length - 1; i >= 0; i--) {
+    const el = headingElements[i]
+    const rect = el.getBoundingClientRect()
+    if (rect.top <= containerRect.top + offset) {
+      activeId = el.getAttribute('data-heading') || ''
+      break
+    }
+  }
+  activeHeadingId.value = activeId
+}
+
+let tocScrollHandler: (() => void) | null = null
+
+watch(() => selectedNote.value, (note) => {
+  if (note) {
+    // Attach scroll listener to content area after a tick
+    setTimeout(() => {
+      const container = noteContentRef.value?.mainContainerRef
+      if (container) {
+        tocScrollHandler = () => requestAnimationFrame(updateActiveHeading)
+        container.addEventListener('scroll', tocScrollHandler)
+        // Trigger initial active heading
+        setTimeout(updateActiveHeading, 100)
+      }
+    }, 100)
+  } else {
+    // Clean up listener when leaving a note
+    if (tocScrollHandler) {
+      const container = noteContentRef.value?.mainContainerRef
+      if (container) {
+        container.removeEventListener('scroll', tocScrollHandler)
+      }
+      tocScrollHandler = null
+    }
+    activeHeadingId.value = ''
+  }
+})
 
 const isDirty = computed(() => isEditing.value && editingContent.value !== initialEditContent.value)
 
@@ -172,19 +298,57 @@ const menuItems = [
 
 <template>
   <div class="home">
-    <aside class="home__sidebar" :class="{ 'home__sidebar--hidden': !showSidebar }">
-      <div class="home__sidebar-header">
-        <div class="home__title" @click="handleShowAbout">云笔记</div>
-        <DropdownMenu :items="menuItems" icon-type="dots" />
-      </div>
-      <NoteList
-        ref="noteListRef"
-        v-model:search-keyword="searchKeyword"
-        :selected-note="selectedNote"
-        @select="handleSelectNote"
-        @edit="handleEditNote"
-        @note-deleted="handleNoteDeleted"
-      />
+    <aside
+      class="home__sidebar"
+      :class="{
+        'home__sidebar--hidden': !showSidebar && !selectedNote,
+        'home__sidebar--content-active': !showSidebar && !!selectedNote
+      }"
+    >
+      <!-- Note list view -->
+      <template v-if="showSidebar || !selectedNote">
+        <div class="home__sidebar-header">
+          <div class="home__title" @click="handleShowAbout">云笔记</div>
+          <DropdownMenu :items="menuItems" icon-type="dots" />
+        </div>
+        <NoteList
+          ref="noteListRef"
+          v-model:search-keyword="searchKeyword"
+          :selected-note="selectedNote"
+          @select="handleSelectNote"
+          @edit="handleEditNote"
+          @note-deleted="handleNoteDeleted"
+        />
+      </template>
+      <!-- Table of contents view (when a note is selected) -->
+      <template v-else>
+        <div class="home__sidebar-header home__sidebar-header--toc">
+          <button class="home__sidebar-back" @click="handleBackToList">
+            <svg class="home__sidebar-back-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M19 12H5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M12 19L5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <span class="home__sidebar-toc-title">目录</span>
+        </div>
+        <div class="home__toc-list">
+          <div v-if="headings.length === 0" class="home__toc-empty">暂无目录</div>
+          <template v-for="(heading, index) in headings" :key="index">
+            <div
+              v-if="heading.level <= 3"
+              class="home__toc-item"
+              :class="{
+                'home__toc-item--h2': heading.level === 2,
+                'home__toc-item--h3': heading.level === 3,
+                'home__toc-item--active': activeHeadingId === heading.id
+              }"
+              @click="scrollToHeading(heading.id)"
+            >
+              {{ heading.text }}
+            </div>
+          </template>
+        </div>
+      </template>
     </aside>
     <main class="home__main" :class="{ 'home__main--hidden': showSidebar }">
       <div v-if="selectedNote && !isEditing" class="home__main-header">
@@ -203,6 +367,7 @@ const menuItems = [
         />
       </div>
       <NoteContent
+        ref="noteContentRef"
         :note="selectedNote"
         :is-editing="isEditing"
         :refresh-key="refreshKey"
@@ -238,10 +403,14 @@ const menuItems = [
   display: flex;
   width: 100%;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .home__sidebar {
   width: 360px;
+  min-height: 0;
+  flex: 0 0 360px;
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
@@ -251,12 +420,106 @@ const menuItems = [
 }
 
 .home__sidebar-header {
+  flex-shrink: 0;
   padding: 18px 32px;
   border-bottom: 1px solid var(--border-color);
   background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.home__sidebar-header--toc {
+  padding: 12px 16px;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+.home__sidebar-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: rgba(255,255,255,0.2);
+  border: none;
+  border-radius: 6px;
+  color: #ffffff;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.home__sidebar-back:hover {
+  background: rgba(255,255,255,0.3);
+}
+
+.home__sidebar-back-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.home__sidebar-toc-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.home__toc-list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding: 8px 0;
+}
+
+.home__toc-empty {
+  text-align: center;
+  color: #9ca3af;
+  padding: 32px 16px;
+  font-size: 14px;
+}
+
+.home__toc-item {
+  padding: 8px 16px 8px 20px;
+  font-size: 14px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-left: 3px solid transparent;
+  line-height: 1.6;
+  user-select: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home__toc-item:hover {
+  background: #f3f4f6;
+  color: var(--primary-color);
+}
+
+.home__toc-item--h2 {
+  padding-left: 20px;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.home__toc-item--h3 {
+  padding-left: 36px;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.home__toc-item--active {
+  color: var(--primary-color);
+  border-left-color: var(--primary-color);
+  background: #f0f7ff;
+  font-weight: 500;
 }
 
 .home__header-actions {
@@ -280,6 +543,8 @@ const menuItems = [
 
 .home__main {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -335,12 +600,15 @@ const menuItems = [
 
   .home__sidebar {
     width: 100%;
+    min-height: 0;
+    flex-basis: 100%;
     height: 100%;
     border-right: none;
     border-bottom: 1px solid var(--border-color);
   }
 
-  .home__sidebar--hidden {
+  .home__sidebar--hidden,
+  .home__sidebar--content-active {
     display: none;
   }
 

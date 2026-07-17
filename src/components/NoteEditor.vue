@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import TaskLists from 'markdown-it-task-lists'
-import TableOfContents from './TableOfContents.vue'
 import '@/styles/preview.css'
 import type { Note } from '@/types'
 
@@ -132,6 +131,99 @@ const restoreCursorPosition = () => {
   }
 }
 
+const replaceSelection = (
+  replacement: string,
+  selectionStartOffset: number,
+  selectionEndOffset: number = selectionStartOffset
+) => {
+  const textarea = editor.value
+  if (!textarea) return
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const nextValue = textarea.value.slice(0, start) + replacement + textarea.value.slice(end)
+  emit('update:content', nextValue)
+  scheduleAutoSave()
+  requestAnimationFrame(() => {
+    if (!editor.value) return
+    editor.value.focus()
+    editor.value.setSelectionRange(start + selectionStartOffset, start + selectionEndOffset)
+  })
+}
+
+const wrapSelection = (before: string, after: string, placeholder: string) => {
+  const textarea = editor.value
+  if (!textarea) return
+  const selected = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd)
+  const content = selected || placeholder
+  replaceSelection(`${before}${content}${after}`, before.length, before.length + content.length)
+}
+
+const prefixSelectedLines = (prefix: string, placeholder: string) => {
+  const textarea = editor.value
+  if (!textarea) return
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const value = textarea.value
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1
+  const lineEndIndex = value.indexOf('\n', end)
+  const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex
+  const selectedLines = value.slice(lineStart, lineEnd) || placeholder
+  const replacement = selectedLines.split('\n').map(line => `${prefix}${line}`).join('\n')
+  const nextValue = value.slice(0, lineStart) + replacement + value.slice(lineEnd)
+  emit('update:content', nextValue)
+  scheduleAutoSave()
+  requestAnimationFrame(() => {
+    if (!editor.value) return
+    editor.value.focus()
+    editor.value.setSelectionRange(lineStart, lineStart + replacement.length)
+  })
+}
+
+const insertNumberedList = () => {
+  const textarea = editor.value
+  if (!textarea) return
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const value = textarea.value
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1
+  const lineEndIndex = value.indexOf('\n', end)
+  const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex
+  const selectedLines = value.slice(lineStart, lineEnd) || '列表项'
+  const replacement = selectedLines.split('\n').map((line, index) => `${index + 1}. ${line}`).join('\n')
+  const nextValue = value.slice(0, lineStart) + replacement + value.slice(lineEnd)
+  emit('update:content', nextValue)
+  scheduleAutoSave()
+  requestAnimationFrame(() => {
+    if (!editor.value) return
+    editor.value.focus()
+    editor.value.setSelectionRange(lineStart, lineStart + replacement.length)
+  })
+}
+
+const insertBlock = (before: string, after: string, placeholder: string) => {
+  const textarea = editor.value
+  if (!textarea) return
+  const selected = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd)
+  const content = selected || placeholder
+  replaceSelection(`${before}${content}${after}`, before.length, before.length + content.length)
+}
+
+const formatActions = [
+  { id: 'heading', label: '标题', shortLabel: 'H', title: '标题', run: () => prefixSelectedLines('## ', '标题') },
+  { id: 'bold', label: '加粗', shortLabel: 'B', title: '加粗 Ctrl+B', run: () => wrapSelection('**', '**', '加粗文字') },
+  { id: 'italic', label: '斜体', shortLabel: 'I', title: '斜体 Ctrl+I', run: () => wrapSelection('*', '*', '斜体文字') },
+  { id: 'underline', label: '下划线', shortLabel: 'U', title: '下划线', run: () => wrapSelection('<u>', '</u>', '下划线文字') },
+  { id: 'strike', label: '删除线', shortLabel: 'S', title: '删除线', run: () => wrapSelection('~~', '~~', '删除文字') },
+  { id: 'inline-code', label: '行内代码', shortLabel: '</>', title: '行内代码', run: () => wrapSelection('`', '`', 'code') },
+  { id: 'code-block', label: '代码块', shortLabel: '{}', title: '代码块 Ctrl+K', run: () => insertBlock('```\n', '\n```', '在此输入代码') },
+  { id: 'quote', label: '引用', shortLabel: '❝', title: '引用', run: () => prefixSelectedLines('> ', '引用内容') },
+  { id: 'unordered-list', label: '无序列表', shortLabel: '•', title: '无序列表', run: () => prefixSelectedLines('- ', '列表项') },
+  { id: 'ordered-list', label: '有序列表', shortLabel: '1.', title: '有序列表', run: insertNumberedList },
+  { id: 'task-list', label: '任务列表', shortLabel: '☑', title: '任务列表', run: () => prefixSelectedLines('- [ ] ', '待办事项') },
+  { id: 'link', label: '链接', shortLabel: '↗', title: '链接 Ctrl+L', run: () => wrapSelection('[', '](https://)', '链接文字') },
+  { id: 'divider', label: '分隔线', shortLabel: '—', title: '分隔线', run: () => replaceSelection('\n\n---\n\n', 5) }
+]
+
 const handleKeyDown = (event: KeyboardEvent) => {
   if (event.key === 'Tab') {
     event.preventDefault()
@@ -150,7 +242,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
   const textarea = editor.value
   if (!textarea) return
 
-  if (!event.ctrlKey) return
+  if (!(event.ctrlKey || event.metaKey)) return
 
   const target = event.target as HTMLTextAreaElement
   const start = target.selectionStart
@@ -187,17 +279,15 @@ const handleKeyDown = (event: KeyboardEvent) => {
       break
     
     case 'k':
-      // Ctrl+K - 代码块
       event.preventDefault()
-      if (selectedText) {
-        newText = `\`\`\`\n${selectedText}\n\`\`\``
-        cursorOffset = newText.length
-      } else {
-        newText = '```\n\n```'
-        cursorOffset = 4
-      }
-      break
-    
+      formatActions.find(action => action.id === 'code-block')?.run()
+      return
+
+    case 'l':
+      event.preventDefault()
+      formatActions.find(action => action.id === 'link')?.run()
+      return
+
     case '>':
       // Ctrl+> - 引用
       event.preventDefault()
@@ -553,19 +643,37 @@ const syncTextareaScroll = () => {
         ref="editor"
         class="note-editor__textarea"
         :value="content"
-        @input="handleContentUpdate($event.target.value)"
+        @input="handleContentUpdate(($event.target as HTMLTextAreaElement).value)"
         @focus="saveCursorPosition"
-        @blur="restoreCursorPosition"
         @keydown="handleKeyDown"
-        placeholder="开始编写你的笔记... (支持 Ctrl+V 粘贴图片, Ctrl+B 加粗, Ctrl+I 斜体, Ctrl+K 代码块, Ctrl+> 引用)"
+        placeholder="开始编写你的笔记…支持 Markdown、粘贴图片与常用快捷键"
         spellcheck="false"
       />
       <div v-show="showPreview" class="note-editor__preview preview-content" v-html="previewHtml"></div>
     </div>
-    <TableOfContents 
-      :content="content"
-      :container="mainContainerRef"
-    />
+    <div class="note-editor__toolbar" role="toolbar" aria-label="Markdown 格式工具栏">
+      <div class="note-editor__toolbar-title">
+        <span class="note-editor__toolbar-dot"></span>
+        <span>格式</span>
+      </div>
+      <div class="note-editor__toolbar-actions">
+        <button
+          v-for="action in formatActions"
+          :key="action.id"
+          type="button"
+          class="note-editor__tool-button"
+          :class="`note-editor__tool-button--${action.id}`"
+          :title="action.title"
+          :aria-label="action.label"
+          @mousedown.prevent
+          @click="action.run"
+        >
+          <span class="note-editor__tool-icon">{{ action.shortLabel }}</span>
+          <span class="note-editor__tool-label">{{ action.label }}</span>
+        </button>
+      </div>
+      <div class="note-editor__toolbar-hint">Ctrl/⌘ + B 加粗 · Ctrl/⌘ + I 斜体 · Ctrl/⌘ + K 代码块</div>
+    </div>
   </div>
 </template>
 
@@ -757,6 +865,125 @@ const syncTextareaScroll = () => {
   color: #000000;
 }
 
+.note-editor__toolbar {
+  flex-shrink: 0;
+  min-height: 66px;
+  padding: 10px 16px;
+  border-top: 1px solid #e5e7eb;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.04);
+}
+
+.note-editor__toolbar-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.note-editor__toolbar-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+}
+
+.note-editor__toolbar-actions {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 2px 0 4px;
+}
+
+.note-editor__toolbar-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.note-editor__tool-button {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.note-editor__tool-button:hover,
+.note-editor__tool-button:focus-visible {
+  color: var(--primary-color);
+  border-color: rgba(59, 130, 246, 0.45);
+  background: #eff6ff;
+  outline: none;
+}
+
+.note-editor__tool-button:active {
+  background: #dbeafe;
+}
+
+.note-editor__tool-icon {
+  min-width: 18px;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 700;
+  text-align: center;
+}
+
+.note-editor__tool-button--italic .note-editor__tool-icon {
+  font-style: italic;
+}
+
+.note-editor__tool-button--underline .note-editor__tool-icon {
+  text-decoration: underline;
+}
+
+.note-editor__tool-button--strike .note-editor__tool-icon {
+  text-decoration: line-through;
+}
+
+.note-editor__tool-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.note-editor__toolbar-hint {
+  color: #94a3b8;
+  font-size: 11px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+@media (max-width: 1180px) {
+  .note-editor__tool-label,
+  .note-editor__toolbar-hint {
+    display: none;
+  }
+
+  .note-editor__tool-button {
+    width: 36px;
+    padding: 0;
+  }
+}
+
 @media (max-width: 768px) {
   .note-editor__header {
     padding: 10px 12px;
@@ -857,6 +1084,27 @@ const syncTextareaScroll = () => {
   .note-editor__preview {
     padding: 12px;
     font-size: 14px;
+  }
+
+  .note-editor__toolbar {
+    min-height: 58px;
+    padding: 8px 10px;
+    gap: 10px;
+  }
+
+  .note-editor__toolbar-title {
+    display: none;
+  }
+
+  .note-editor__toolbar-actions {
+    gap: 5px;
+  }
+
+  .note-editor__tool-button {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 7px;
   }
 }
 </style>

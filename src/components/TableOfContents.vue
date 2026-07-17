@@ -25,17 +25,25 @@ const isOpen = ref(false)
 const activeId = ref('')
 const headings = ref<Heading[]>([])
 
+const createUniqueHeadingId = (text: string, counts: Map<string, number>) => {
+  const baseId = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-') || 'heading'
+  const occurrence = (counts.get(baseId) || 0) + 1
+  counts.set(baseId, occurrence)
+  return occurrence === 1 ? baseId : `${baseId}-${occurrence}`
+}
+
 const parseHeadings = (markdown: string): Heading[] => {
-  const lines = markdown.split('\n')
+  const lines = markdown.split(/[\r\n]+/)
   const result: Heading[] = []
   const stack: { heading: Heading; level: number }[] = []
+  const counts = new Map<string, number>()
 
   lines.forEach((line) => {
     const match = line.match(/^(#{1,6})\s+(.+)$/)
     if (match) {
       const level = match[1].length
       const text = match[2].trim()
-      const id = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+      const id = createUniqueHeadingId(text, counts)
 
       const heading: Heading = {
         id,
@@ -78,16 +86,17 @@ const scrollToHeading = (id: string) => {
   // For editing mode, find the heading in textarea
   const textarea = props.container.querySelector('textarea')
   if (textarea) {
-    const lines = props.content.split('\n')
+    const lines = props.content.split(/[\r\n]+/)
     let targetLine = -1
     let targetText = ''
 
-    // Find the target heading line
+    const counts = new Map<string, number>()
+    // Find the target heading line using the same duplicate-aware IDs
     for (let i = 0; i < lines.length; i++) {
       const match = lines[i].match(/^(#{1,6})\s+(.+)$/)
       if (match) {
         const text = match[2].trim()
-        const headingId = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+        const headingId = createUniqueHeadingId(text, counts)
         if (headingId === id) {
           targetLine = i
           targetText = text
@@ -134,9 +143,10 @@ const scrollToHeading = (id: string) => {
   // For viewing mode, use scrollIntoView with container
   if (!element && props.container) {
     const headingElements = Array.from(props.container.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+    const counts = new Map<string, number>()
     for (const el of headingElements) {
       const text = el.textContent?.trim() || ''
-      const headingId = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+      const headingId = createUniqueHeadingId(text, counts)
       if (headingId === id) {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' })
         break
@@ -150,7 +160,7 @@ const updateActiveHeading = () => {
 
   const textarea = props.container.querySelector('textarea')
   if (textarea) {
-    const lines = props.content.split('\n')
+    const lines = props.content.split(/[\r\n]+/)
     const computedStyle = window.getComputedStyle(textarea)
     const lineHeightPx = computedStyle.lineHeight
     const fontSizePx = computedStyle.fontSize
@@ -159,13 +169,14 @@ const updateActiveHeading = () => {
     const currentLine = Math.min(Math.floor(scrollTop / lineHeight), lines.length - 1)
     
     let activeHeadingId = ''
+    const counts = new Map<string, number>()
     for (let i = 0; i <= currentLine; i++) {
       const line = lines[i]
       if (line == null) continue
       const match = line.match(/^(#{1,6})\s+(.+)$/)
       if (match) {
         const text = match[2].trim()
-        activeHeadingId = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+        activeHeadingId = createUniqueHeadingId(text, counts)
       }
     }
     
