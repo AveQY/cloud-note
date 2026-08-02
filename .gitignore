@@ -1,0 +1,28 @@
+
+# Runtime data
+log/login
+log/shares.json
+log/note-metadata.json
+
+# Build output
+/dist/
+
+# Dependencies
+/node_modules/
+
+# Temp files
+/temp-upload/
+/temp-extract-*/
+/file/
+/image/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+log/server.err
+log/server.out
+log/server.pid
