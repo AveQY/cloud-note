@@ -61,8 +61,10 @@ const headings = computed(() => {
 })
 
 const handleShowMobileToc = () => {
-  if (window.matchMedia('(max-width: 768px)').matches && selectedNote.value && !isEditing.value) {
+  if (selectedNote.value && !isEditing.value) {
     showMobileToc.value = true
+  } else if (selectedNote.value && isEditing.value) {
+    showSidebar.value = false
   }
 }
 
@@ -76,34 +78,50 @@ const handleMobileTocSelect = (id: string) => {
 }
 
 const scrollToHeading = (id: string) => {
-  const container = noteContentRef.value?.mainContainerRef
-  if (!container) return
-
   if (isEditing.value) {
-    const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null
-    if (!textarea) return
-    const content = editingContent.value
-    const lines = content.split(/[\r\n]+/)
-    const counts = new Map<string, number>()
-    let offset = 0
-    for (const line of lines) {
-      const match = line.match(/^(#{1,6})\s+(.+)$/)
-      if (match) {
-        const headingId = createUniqueHeadingId(match[2].trim(), counts)
-        if (headingId === id) {
-          textarea.focus()
-          textarea.setSelectionRange(offset, offset + line.length)
-          const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 24
-          const lineIndex = content.slice(0, offset).split(/[\r\n]+/).length - 1
-          textarea.scrollTo({ top: Math.max(0, lineIndex * lineHeight - 80), behavior: 'smooth' })
-          activeHeadingId.value = id
-          return
+    const container = noteContentRef.value?.mainContainerRef
+    if (!container) return
+
+    // 预览模式：直接在 DOM 中查找标题节点
+    const target = container.querySelector(`[data-heading="${id}"]`)
+    if (target) {
+      ;(target as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' })
+      activeHeadingId.value = id
+      return
+    }
+
+    // 纯文本模式：在 textarea 中查找标题行并滚动
+    const textarea = container.querySelector('textarea')
+    if (textarea) {
+      const content = editingContent.value
+      const lines = content.split(/[\r\n]+/)
+      const counts = new Map<string, number>()
+      let offset = 0
+      for (const line of lines) {
+        const match = line.match(/^(#{1,6})\s+(.+)$/)
+        if (match) {
+          const baseId = match[2].trim().toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-') || 'heading'
+          const occurrence = (counts.get(baseId) || 0) + 1
+          counts.set(baseId, occurrence)
+          const headingId = occurrence === 1 ? baseId : `${baseId}-${occurrence}`
+          if (headingId === id) {
+            const ta = textarea as HTMLTextAreaElement
+            ta.focus({ preventScroll: true })
+            ta.setSelectionRange(offset, offset)
+            const ratio = content.length ? offset / content.length : 0
+            ta.scrollTop = Math.max(0, (ta.scrollHeight - ta.clientHeight) * ratio)
+            activeHeadingId.value = id
+            return
+          }
         }
+        offset += line.length + 1
       }
-      offset += line.length + 1
     }
     return
   }
+
+  const container = noteContentRef.value?.mainContainerRef
+  if (!container) return
 
   const element = container.querySelector(`[data-heading="${id}"]`)
   if (element) {
@@ -146,13 +164,12 @@ let tocScrollHandler: (() => void) | null = null
 watch(() => selectedNote.value, (note) => {
   showMobileToc.value = false
   if (note) {
-    // Attach scroll listener to content area after a tick
+    showMobileToc.value = false
     setTimeout(() => {
       const container = noteContentRef.value?.mainContainerRef
       if (container) {
         tocScrollHandler = () => requestAnimationFrame(updateActiveHeading)
         container.addEventListener('scroll', tocScrollHandler)
-        // Trigger initial active heading
         setTimeout(updateActiveHeading, 100)
       }
     }, 100)
@@ -185,13 +202,17 @@ const handleSelectNote = (note: Note) => {
 
 const handleEditNote = (note: Note) => {
   selectedNote.value = note
-  initialEditContent.value = currentNoteContent.value
+  const source = currentNoteContent.value || editingContent.value
+  editingContent.value = source
+  initialEditContent.value = source
   isEditing.value = true
   showSidebar.value = false
 }
 
 const handleEdit = () => {
-  initialEditContent.value = currentNoteContent.value
+  const source = currentNoteContent.value || editingContent.value
+  editingContent.value = source
+  initialEditContent.value = source
   isEditing.value = true
 }
 
@@ -234,16 +255,42 @@ const handleBackToList = () => {
 // Watch for route changes to load note from URL parameter
 watch(() => route.params.noteId, async (noteId) => {
   if (noteId && !selectedNote.value) {
-    // Load note from API based on noteId
+    const decodedId = decodeURIComponent(String(noteId))
+    const fallbackFilename = decodedId.endsWith('.md') ? decodedId : `${decodedId}.md`
+    selectedNote.value = {
+      id: decodedId,
+      title: fallbackFilename.replace(/\.md$/i, ''),
+      filename: fallbackFilename,
+      path: `/file/${fallbackFilename}`,
+      size: 0,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+    showSidebar.value = false
+    isEditing.value = false
+    currentNoteContent.value = ''
+    editingContent.value = ''
+
     try {
       const response = await fetch(`/api/files?page=1&pageSize=10000`)
       if (response.ok) {
         const data = await response.json()
         const notes = data.data || data.files || []
-        const note = notes.find((n: any) => n.id === noteId || n.filename === noteId)
+        const decodedId = decodeURIComponent(String(noteId))
+        const note = notes.find((n: any) =>
+          n.id === noteId || n.filename === noteId || n.path === decodedId ||
+          n.filename === decodedId || n.title === decodedId.replace(/\.md$/i, '')
+        )
         if (note) {
-          selectedNote.value = note
+          selectedNote.value = {
+            ...note,
+            createdAt: new Date(note.createdAt ?? note.lastModified),
+            updatedAt: new Date(note.updatedAt ?? note.lastModified)
+          }
           showSidebar.value = false
+          isEditing.value = false
+          currentNoteContent.value = ''
+          editingContent.value = ''
         }
       }
     } catch (e) {
@@ -306,9 +353,31 @@ const handleSave = async (content: string, isAutoSave: boolean = false) => {
   }
 }
 
-const handleCancel = () => {
+const showExitEditDialog = ref(false)
+
+const handleExitEdit = () => {
+  if (isDirty.value) {
+    showExitEditDialog.value = true
+    return
+  }
   isEditing.value = false
 }
+
+const confirmExitAndSave = async () => {
+  await handleSave(editingContent.value)
+  showExitEditDialog.value = false
+}
+
+const discardExitEdit = () => {
+  editingContent.value = initialEditContent.value
+  isEditing.value = false
+  showExitEditDialog.value = false
+}
+
+const cancelExitEdit = () => {
+  showExitEditDialog.value = false
+}
+
 
 const handleShowAbout = async () => {
   try {
@@ -386,7 +455,7 @@ const menuItems = [
               <path d="M12 19L5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
-          <span class="home__sidebar-toc-title">目录</span>
+          <span class="home__sidebar-toc-title">{{ isEditing && selectedNote ? selectedNote.title : '目录' }}</span>
         </div>
         <div class="home__toc-list">
           <div v-if="headings.length === 0" class="home__toc-empty">暂无目录</div>
@@ -399,7 +468,7 @@ const menuItems = [
                 'home__toc-item--h3': heading.level === 3,
                 'home__toc-item--active': activeHeadingId === heading.id
               }"
-              @click="scrollToHeading(heading.id)"
+          @click="showSidebar = false; scrollToHeading(heading.id)"
             >
               {{ heading.text }}
             </div>
@@ -407,15 +476,19 @@ const menuItems = [
         </div>
       </template>
     </aside>
-    <main class="home__main" :class="{ 'home__main--hidden': showSidebar, 'home__main--empty': !selectedNote }">
-      <div v-if="selectedNote && !isEditing" class="home__main-header">
+    <main class="home__main" :class="{ 'home__main--hidden': false, 'home__main--empty': false }">
+      <div v-if="(selectedNote || route.params.noteId) && !isEditing" class="home__main-header">
         <NoteActions
+          v-if="selectedNote"
           :is-editing="isEditing"
           :note="selectedNote"
           :content="currentNoteContent"
           @edit="handleEdit"
           @show-toc="handleShowMobileToc"
         />
+        <div v-else class="home__direct-note-title">
+          {{ decodeURIComponent(String(route.params.noteId || '')).replace(/\.md$/i, '') }}
+        </div>
       </div>
       <NoteContent
         ref="noteContentRef"
@@ -423,7 +496,7 @@ const menuItems = [
         :is-editing="isEditing"
         :refresh-key="refreshKey"
         @save="(content, isAutoSave) => handleSave(content, isAutoSave || false)"
-        @cancel="handleBackToList"
+        @cancel="handleExitEdit"
         @content-loaded="currentNoteContent = $event"
         @update:editing-content="editingContent = $event"
       />
@@ -460,6 +533,18 @@ const menuItems = [
       title="关于"
       :content="aboutContent"
       @close="handleCloseAbout"
+    />
+    <ConfirmDialog
+      :show="showExitEditDialog"
+      title="退出编辑"
+      message="当前笔记有未保存的修改，是否保存后退出？"
+      confirm-text="保存并退出"
+      cancel-text="继续编辑"
+      discard-text="不保存退出"
+      type="warning"
+      @confirm="confirmExitAndSave"
+      @cancel="cancelExitEdit"
+      @discard="discardExitEdit"
     />
     <ConfirmDialog
       :show="showUnsavedDialog"
@@ -660,6 +745,53 @@ const menuItems = [
   height: auto;
   min-height: 64px;
 }
+
+.home__direct-note-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.home__edit-toc-bar {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--border-color);
+  background: #ffffff;
+}
+
+.home__edit-toc-button {
+  padding: 6px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.home__edit-toc-button:hover {
+  background: #f3f4f6;
+}
+
+.home__edit-title {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+  cursor: pointer;
+}
+
+.home__edit-state {
+  margin-left: 10px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
 
 .home__mobile-toc {
   display: none;

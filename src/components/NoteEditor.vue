@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import MarkdownIt from 'markdown-it'
 import TaskLists from 'markdown-it-task-lists'
+import TurndownService from 'turndown'
 import '@/styles/preview.css'
 import type { Note } from '@/types'
 
@@ -29,10 +30,23 @@ md.renderer.rules.image = function (tokens, idx, options, env, self) {
   return self.renderToken(tokens, idx, options)
 }
 
+md.renderer.rules.heading_open = function (tokens, idx, options, env: any, self) {
+  const nextToken = tokens[idx + 1]
+  if (nextToken?.type === 'inline') {
+    const counts = env.headingCounts || (env.headingCounts = new Map<string, number>())
+    const base = nextToken.content.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-') || 'heading'
+    const count = (counts.get(base) || 0) + 1
+    counts.set(base, count)
+    tokens[idx].attrSet('data-heading', count === 1 ? base : `${base}-${count}`)
+  }
+  return self.renderToken(tokens, idx, options)
+}
 interface Props {
   note: Note
   content: string
 }
+
+
 
 const props = defineProps<Props>()
 
@@ -80,12 +94,19 @@ const fileInfo = computed(() => {
 })
 
 const showPreview = ref(true)
-const previewHtml = computed(() => md.render(props.content))
+const localContent = ref(props.content || '')
+const previewHtml = computed(() => {
+  const env = { headingCounts: new Map<string, number>() }
+  return md.render(localContent.value, env)
+})
+const renderedEditor = ref<HTMLElement | null>(null)
+const turndown = new TurndownService({ headingStyle: 'atx', bulletListMarker: '-' })
 let isSyncingScroll = false
 
 const AUTO_SAVE_DELAY_MS = 15000
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
-let savedCursorPosition: { start: number; end: number } | null = null
+const savedCursorPosition = ref<{ start: number; end: number } | null>(null)
+const pendingPosition = ref<{ sourceOffset: number; sourceRatio: number } | null>(null)
 
 const scheduleAutoSave = () => {
   if (autoSaveTimer) clearTimeout(autoSaveTimer)
@@ -94,17 +115,119 @@ const scheduleAutoSave = () => {
     // Save cursor position before auto-save
     const textarea = editor.value
     if (textarea) {
-      savedCursorPosition = {
+      savedCursorPosition.value = {
         start: textarea.selectionStart,
         end: textarea.selectionEnd
       }
     }
     // Silently save in background without exiting edit mode
-    emit('save', props.content, true)
+    emit('save', localContent.value, true)
   }, AUTO_SAVE_DELAY_MS)
 }
 
+const syncRenderedEditor = async () => {
+  await nextTick()
+  if (showPreview.value && renderedEditor.value) {
+    renderedEditor.value.innerHTML = previewHtml.value
+  }
+}
+
+watch(() => props.content, async (value) => {
+  if (value !== localContent.value) {
+    localContent.value = value || ''
+    await syncRenderedEditor()
+  }
+}, { immediate: true })
+
+onMounted(() => {
+  syncRenderedEditor()
+})
+
+const capturePreviewPosition = () => {
+  if (!showPreview.value || !renderedEditor.value) return
+  const sourceOffset = getRenderedSourceOffset()
+  const max = Math.max(1, renderedEditor.value.scrollHeight - renderedEditor.value.clientHeight)
+  pendingPosition.value = {
+    sourceOffset,
+    sourceRatio: renderedEditor.value.scrollTop / max
+  }
+}
+
+const togglePreview = async () => {
+  if (!showPreview.value && editor.value) {
+    const max = Math.max(1, editor.value.scrollHeight - editor.value.clientHeight)
+    pendingPosition.value = {
+      sourceOffset: editor.value.selectionStart,
+      sourceRatio: editor.value.scrollTop / max
+    }
+  } else if (showPreview.value && renderedEditor.value) {
+    capturePreviewPosition()
+  }
+
+  showPreview.value = !showPreview.value
+  await syncRenderedEditor()
+
+  if (!pendingPosition.value) return
+  const sourceRatio = localContent.value.length
+    ? pendingPosition.value.sourceOffset / localContent.value.length
+    : pendingPosition.value.sourceRatio
+  const target = showPreview.value ? renderedEditor.value : editor.value
+  if (target) {
+    await nextTick()
+    const max = Math.max(0, target.scrollHeight - target.clientHeight)
+    target.scrollTop = max * Math.min(1, Math.max(0, sourceRatio))
+  }
+  pendingPosition.value = null
+}
+
+const cleanMarkdown = (value: string) => value.replace(/\\(?=[#*_[\]`])/g, '')
+
+const getTextOffsetAtPoint = (root: HTMLElement, node: Node, offset: number) => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let total = 0
+  let current: Node | null
+  while ((current = walker.nextNode())) {
+    if (current === node) return total + offset
+    total += current.textContent?.length || 0
+  }
+  return total
+}
+
+const getRenderedSourceOffset = () => {
+  const root = renderedEditor.value
+  const selection = window.getSelection()
+  if (!root || !selection || selection.rangeCount === 0) return 0
+  const range = selection.getRangeAt(0)
+  return getTextOffsetAtPoint(root, range.startContainer, range.startOffset)
+}
+
+
+
+const updateRenderedContent = (event: Event) => {
+  const target = event.currentTarget as HTMLElement
+  const selection = window.getSelection()
+  const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+  const marker = document.createElement('span')
+  marker.dataset.cursorMarker = 'true'
+  if (range && target.contains(range.startContainer)) range.insertNode(marker)
+
+  const markdown = cleanMarkdown(turndown.turndown(target.innerHTML))
+  localContent.value = markdown
+  emit('update:content', markdown)
+  scheduleAutoSave()
+
+  if (marker.parentNode) marker.remove()
+}
+
+const handleRenderedKeydown = (event: KeyboardEvent) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    handleSave()
+  }
+}
+
 const handleContentUpdate = (newContent: string) => {
+  localContent.value = newContent
   emit('update:content', newContent)
   scheduleAutoSave()
 }
@@ -112,7 +235,7 @@ const handleContentUpdate = (newContent: string) => {
 const saveCursorPosition = () => {
   const textarea = editor.value
   if (textarea) {
-    savedCursorPosition = {
+    savedCursorPosition.value = {
       start: textarea.selectionStart,
       end: textarea.selectionEnd
     }
@@ -121,13 +244,13 @@ const saveCursorPosition = () => {
 
 const restoreCursorPosition = () => {
   const textarea = editor.value
-  if (textarea && savedCursorPosition && savedCursorPosition.start !== null) {
+  if (textarea && savedCursorPosition.value && savedCursorPosition.value.start !== null) {
     const newLength = textarea.value.length
     textarea.setSelectionRange(
-      Math.min(savedCursorPosition.start, newLength),
-      Math.min(savedCursorPosition.end, newLength)
+      Math.min(savedCursorPosition.value.start, newLength),
+      Math.min(savedCursorPosition.value.end, newLength)
     )
-    savedCursorPosition = null
+    savedCursorPosition.value = null
   }
 }
 
@@ -141,6 +264,7 @@ const replaceSelection = (
   const start = textarea.selectionStart
   const end = textarea.selectionEnd
   const nextValue = textarea.value.slice(0, start) + replacement + textarea.value.slice(end)
+  localContent.value = nextValue
   emit('update:content', nextValue)
   scheduleAutoSave()
   requestAnimationFrame(() => {
@@ -170,6 +294,7 @@ const prefixSelectedLines = (prefix: string, placeholder: string) => {
   const selectedLines = value.slice(lineStart, lineEnd) || placeholder
   const replacement = selectedLines.split('\n').map(line => `${prefix}${line}`).join('\n')
   const nextValue = value.slice(0, lineStart) + replacement + value.slice(lineEnd)
+  localContent.value = nextValue
   emit('update:content', nextValue)
   scheduleAutoSave()
   requestAnimationFrame(() => {
@@ -191,6 +316,7 @@ const insertNumberedList = () => {
   const selectedLines = value.slice(lineStart, lineEnd) || '列表项'
   const replacement = selectedLines.split('\n').map((line, index) => `${index + 1}. ${line}`).join('\n')
   const nextValue = value.slice(0, lineStart) + replacement + value.slice(lineEnd)
+  localContent.value = nextValue
   emit('update:content', nextValue)
   scheduleAutoSave()
   requestAnimationFrame(() => {
@@ -490,7 +616,12 @@ const handlePaste = async (event: ClipboardEvent) => {
 }
 
 const handleSave = () => {
-  emit('save', props.content, false)
+  if (showPreview.value && renderedEditor.value) {
+    const markdown = cleanMarkdown(turndown.turndown(renderedEditor.value.innerHTML))
+    emit('save', markdown, false)
+  } else {
+    emit('save', localContent.value, false)
+  }
 }
 
 onMounted(() => {
@@ -595,6 +726,46 @@ const syncTextareaScroll = () => {
   }
 }
 
+const createHeadingId = (text: string, counts: Map<string, number>) => {
+  const base = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-') || 'heading'
+  const count = (counts.get(base) || 0) + 1
+  counts.set(base, count)
+  return count === 1 ? base : `${base}-${count}`
+}
+
+const scrollToHeading = (id: string) => {
+  if (showPreview.value && renderedEditor.value) {
+    const target = renderedEditor.value.querySelector(`[data-heading="${id}"]`)
+    if (target) {
+      ;(target as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return true
+    }
+  }
+
+  const textarea = editor.value
+  if (!textarea) return false
+  const lines = textarea.value.split(/\r?\n/)
+  const counts = new Map<string, number>()
+  let offset = 0
+  for (const line of lines) {
+    const match = line.match(/^(#{1,6})\s+(.+)$/)
+    if (match && createHeadingId(match[2].trim(), counts) === id) {
+      textarea.focus({ preventScroll: true })
+      textarea.setSelectionRange(offset, offset)
+      const ratio = localContent.value.length ? offset / localContent.value.length : 0
+      textarea.scrollTop = Math.max(0, (textarea.scrollHeight - textarea.clientHeight) * ratio)
+      return true
+    }
+    offset += line.length + 1
+  }
+  return false
+}
+
+defineExpose({
+  mainContainerRef,
+  scrollToHeading
+})
+
 </script>
 
 <template>
@@ -606,13 +777,14 @@ const syncTextareaScroll = () => {
             <path d="M19 12H5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M12 19L5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span class="note-editor__back-text">返回</span>
+          <span class="note-editor__back-text">退出编辑</span>
         </button>
         <button
           type="button"
           class="note-editor__preview-toggle"
           :class="{ 'note-editor__preview-toggle--active': showPreview }"
-          @click="showPreview = !showPreview"
+          @mousedown="capturePreviewPosition"
+        @click="togglePreview"
           title="切换预览"
         >
           <svg class="note-editor__preview-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -639,17 +811,26 @@ const syncTextareaScroll = () => {
       </button>
     </div>
     <div class="note-editor__body" :class="{ 'note-editor__body--preview-on': showPreview }">
+      <div
+        v-if="showPreview"
+        ref="renderedEditor"
+        class="note-editor__rendered-editor preview-content"
+        contenteditable="true"
+        spellcheck="false"
+        @input="updateRenderedContent"
+        @keydown="handleRenderedKeydown"
+      ></div>
       <textarea
+        v-else
         ref="editor"
         class="note-editor__textarea"
-        :value="content"
+        :value="localContent"
         @input="handleContentUpdate(($event.target as HTMLTextAreaElement).value)"
         @focus="saveCursorPosition"
         @keydown="handleKeyDown"
         placeholder="开始编写你的笔记…支持 Markdown、粘贴图片与常用快捷键"
         spellcheck="false"
       />
-      <div v-show="showPreview" class="note-editor__preview preview-content" v-html="previewHtml"></div>
     </div>
     <div class="note-editor__toolbar" role="toolbar" aria-label="Markdown 格式工具栏">
       <div class="note-editor__toolbar-title">
@@ -823,7 +1004,31 @@ const syncTextareaScroll = () => {
   display: flex;
 }
 
-.note-editor__body--preview-on .note-editor__textarea {
+.note-editor__body--preview-on .note-editor__rendered-editor {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 24px;
+  outline: none;
+  background: #ffffff;
+  caret-color: var(--primary-color);
+}
+
+.note-editor__body--preview-on .note-editor__rendered-editor.preview-content {
+  max-width: none;
+  margin: 0;
+  padding: 24px;
+}
+
+.note-editor__rendered-editor:focus {
+  box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.12);
+}
+
+.note-editor__textarea {
   flex: 1;
   min-width: 0;
   border-right: 1px solid var(--border-color);

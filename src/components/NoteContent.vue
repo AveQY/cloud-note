@@ -33,7 +33,7 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const contentBodyRef = ref<HTMLElement | null>(null)
 const mainContainerRef = ref<HTMLElement | null>(null)
-
+const editorRef = ref<InstanceType<typeof NoteEditor> | null>(null)
 const md = new MarkdownIt({
   html: true,
   linkify: true,
@@ -167,7 +167,10 @@ watch(() => props.refreshKey, loadNoteContent)
 
 watch(
   () => [props.isEditing, markdownContent.value] as const,
-  () => {
+  async () => {
+    if (props.isEditing && !markdownContent.value && props.note) {
+      await loadNoteContent()
+    }
     if (props.isEditing) {
       emit('update:editingContent', markdownContent.value)
     }
@@ -175,8 +178,22 @@ watch(
   { immediate: true }
 )
 
+const scrollToHeading = (id: string) => {
+  if (props.isEditing) {
+    return editorRef.value?.scrollToHeading?.(id) ?? false
+  }
+
+  const element = mainContainerRef.value?.querySelector(`[data-heading="${id}"]`)
+  if (element) {
+    element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return true
+  }
+  return false
+}
 defineExpose({
-  mainContainerRef
+  mainContainerRef,
+  editorRef,
+  scrollToHeading
 })
 </script>
 
@@ -205,7 +222,9 @@ defineExpose({
       <p>选择一个笔记开始阅读</p>
     </div>
     <NoteEditor
+      ref="editorRef"
       v-else-if="isEditing && note"
+      :key="`editor-${note.path}`"
       :note="note"
       :content="markdownContent"
       @update:content="(v) => { markdownContent = v; emit('update:editingContent', v) }"
