@@ -665,14 +665,19 @@ app.post('/api/upload', (req, res) => {
         const parts = body.split(`--${boundary}`)
         let filename = ''
         let fileContent = ''
-        
+        let categoryId = null
+
         for (const part of parts) {
           const filenameMatch = part.match(/filename="(.+?)"/)
           if (filenameMatch) {
             filename = filenameMatch[1]
             const contentStart = part.indexOf('\r\n\r\n')
             fileContent = part.substring(contentStart + 4).replace(/\r\n$/, '')
-            break
+            continue
+          }
+          const categoryMatch = part.match(/name="categoryId"[\s\S]*?\r\n\r\n([^\r\n]*)/)
+          if (categoryMatch) {
+            categoryId = categoryMatch[1] || null
           }
         }
         
@@ -694,14 +699,25 @@ app.post('/api/upload', (req, res) => {
         }
 
         writeFileSync(filePath, fileContent, 'utf-8')
-        
+
+        // 上传到指定分类：写入元数据
+        if (categoryId) {
+          const metadata = loadMetadata()
+          if (!metadata.categories.some(item => item.id === categoryId)) {
+            categoryId = null
+          }
+          metadata.notes[filename] = { ...(metadata.notes[filename] || {}), categoryId }
+          saveMetadata(metadata)
+        }
+
         const stats = statSync(filePath)
         const note = {
           id: `${stats.mtime.getTime()}`,
           filename,
           title: filename.replace(/\.md$/, ''),
           path: `/file/${filename}`,
-          lastModified: stats.mtime.getTime()
+          lastModified: stats.mtime.getTime(),
+          categoryId
         }
         
         res.json({ success: true, note })

@@ -311,8 +311,12 @@ const handleUpload = async (event: Event, overwrite = false) => {
   if (!file) return
 
   const form = new FormData()
-  form.append('file', file)
-  if (overwrite) form.append('overwrite', 'true')
+    form.append('file', file)
+    // 上传到当前选中的分类（全部/未分类不传）
+    if (selectedCategory.value && selectedCategory.value !== 'all' && selectedCategory.value !== 'uncategorized') {
+      form.append('categoryId', selectedCategory.value)
+    }
+    if (overwrite) form.append('overwrite', 'true')
   const response = await fetch('/api/upload', { method: 'POST', body: form })
   const data = await response.json()
 
